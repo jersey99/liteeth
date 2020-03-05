@@ -35,8 +35,7 @@ class LiteEthARPTX(Module):
         self.submodules.packetizer = packetizer = LiteEthARPPacketizer(dw)
         # TODO: Why is there a comparision, below, don't we know definitely??
         #       Also what is the point of generating the extra zeros to fill the ethernet packet here??
-        counter_size = max(arp_header.length, 48)//(dw//8)
-        # TODO: will not work for 64bit width
+        counter_size = max(arp_header.length, 512)//(dw//8)
         counter = Signal(max=counter_size, reset_less=True)
         counter_reset = Signal()
         counter_ce = Signal()

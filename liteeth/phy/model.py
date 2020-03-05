@@ -27,11 +27,11 @@ class LiteEthPHYModelCRG(Module, AutoCSR):
 
 
 class LiteEthPHYModel(Module, AutoCSR):
-    dw = 8
-    def __init__(self, pads):
+    def __init__(self, pads, dw=8):
+        self.dw = dw
         self.submodules.crg = LiteEthPHYModelCRG()
-        self.sink = sink = stream.Endpoint(eth_phy_description(8))
-        self.source = source = stream.Endpoint(eth_phy_description(8))
+        self.sink = sink = stream.Endpoint(eth_phy_description(dw))
+        self.source = source = stream.Endpoint(eth_phy_description(dw))
 
         self.comb += [
             pads.source_valid.eq(self.sink.valid),

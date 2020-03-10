@@ -99,6 +99,7 @@ def xgmii_io(dw):
         ),
     ]
 
+
 class Platform(SimPlatform):
     default_clk_name = "sys_clk"
     default_clk_period = 1000  # ~ 1MHz
@@ -108,6 +109,7 @@ class Platform(SimPlatform):
 
     def do_finalize(self, fragment):
         pass
+
 
 class SimSoC(SoCCore):
     def __init__(self,

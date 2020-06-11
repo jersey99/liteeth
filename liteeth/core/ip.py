@@ -103,7 +103,7 @@ class LiteEthIPV4Fragmenter(Module):
     '''
     def __init__(self, dw=8):
         self.sink = sink = stream.Endpoint(eth_ipv4_user_description(dw))
-        self.source = source = stream.BufferizedEndpoint(eth_ipv4_user_description(dw))
+        self.source = source = stream.Endpoint(eth_ipv4_user_description(dw))
         self.comb += sink.connect(source)
         ww = dw // 8
         # counter logic ;)
@@ -209,7 +209,7 @@ class LiteEthIPTX(Module):
             checksum.reset.eq(source.valid & source.last & source.ready)
         ]
         # ip_fragmenter = BufferizeEndpoints({"source": DIR_SOURCE})(LiteEthIPV4Fragmenter(dw))
-        self.submodules.ip_fragmenter = ip_fragmenter = LiteEthIPV4Fragmenter(dw)
+        self.submodules.ip_fragmenter = ip_fragmenter = BufferizeEndpoints({"source": DIR_SOURCE})(LiteEthIPV4Fragmenter(dw))
         self.comb += sink.connect(ip_fragmenter.sink)
         self.submodules.packetizer = packetizer = LiteEthIPV4Packetizer(dw)
         self.comb += [

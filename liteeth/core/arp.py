@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 from liteeth.common import *
+from liteeth.misc import FatHash
 
 from migen.genlib.misc import WaitTimer
 
@@ -148,7 +149,7 @@ class LiteEthARPRX(Module):
 # ARP Table ----------------------------------------------------------------------------------------
 
 class LiteEthARPTable(Module):
-    def __init__(self, clk_freq, max_requests=8):
+    def __init__(self, clk_freq, max_requests=8, arp_table_size=2):
         self.sink   = sink   = stream.Endpoint(_arp_table_layout)  # from arp_rx
         self.source = source = stream.Endpoint(_arp_table_layout)  # to arp_tx
 
@@ -194,16 +195,18 @@ class LiteEthARPTable(Module):
         # Note: Store only 1 IP/MAC couple, can be improved with a real
         # table in the future to improve performance when packets are
         # targeting multiple destinations.
+        cache = FatHash(vw=48, depth=arp_table_size, reset_vals=[0 for _ in range(arp_table_size)])
+        self.submodules += cache
         update = Signal()
         cached_valid       = Signal()
         cached_ip_address  = Signal(32, reset_less=True)
         cached_mac_address = Signal(48, reset_less=True)
         cached_timer       = WaitTimer(clk_freq*10)
         self.submodules += cached_timer
-
-        self.submodules.fsm = fsm = FSM(reset_state="IDLE")
+        self.fsm = fsm = FSM(reset_state="IDLE")
+        self.submodules += fsm
         fsm.act("IDLE",
-            # Note: for simplicicy, if ARP table is busy response from arp_rx
+            # Note: for simplicity, if ARP table is busy, response from arp_rx
             # is lost. This is compensated by the protocol (retries)
             If(sink.valid & sink.request,
                 NextState("SEND_REPLY")
@@ -211,7 +214,11 @@ class LiteEthARPTable(Module):
                 NextState("UPDATE_TABLE"),
             ).Elif(request_counter == max_requests-1,
                 NextState("PRESENT_RESPONSE")
-            ).Elif(request.valid | (request_pending & request_timer.done),
+            ).Elif(request.valid,
+                NextValue(cache.search_val, request.ip_address),
+                NextState("CHECK_TABLE")
+            ).Elif(request_pending & request_timer.done,
+                NextValue(cache.search_val, request_ip_address),
                 NextState("CHECK_TABLE")
             )
         )
@@ -231,21 +238,26 @@ class LiteEthARPTable(Module):
         )
         self.sync += \
             If(update,
+                cache.search_val.eq(request_ip_address),
                 cached_valid.eq(1),
-                cached_ip_address.eq(sink.ip_address),
-                cached_mac_address.eq(sink.mac_address),
+                cache.load.eq(1),
+                cache.i.eq(Cat(sink.mac_address, sink.ip_address))
             ).Else(
+                cache.load.eq(0),
                 If(cached_timer.done,
-                    cached_valid.eq(0)
+                    cached_valid.eq(1)
                 )
             )
+
+        # NOTE: cached_timer now times the last entry into cache
+        #       Would be good to check if it's an abuse of spec
         self.comb += cached_timer.wait.eq(~update)
         fsm.act("CHECK_TABLE",
             If(cached_valid,
-                If(request_ip_address == cached_ip_address,
+                If(request_ip_address == cache.result[48:],
                     request_ip_address_reset.eq(1),
                     NextState("PRESENT_RESPONSE"),
-                ).Elif(request.ip_address == cached_ip_address,
+                ).Elif(request.ip_address == cache.result[48:],
                     request.ready.eq(request.valid),
                     NextState("PRESENT_RESPONSE"),
                 ).Else(
@@ -275,7 +287,7 @@ class LiteEthARPTable(Module):
                 request_counter_reset.eq(1),
                 request_pending_clr.eq(1)
             ),
-            response.mac_address.eq(cached_mac_address)
+            response.mac_address.eq(cache.result[:48])
         ]
         fsm.act("PRESENT_RESPONSE",
             response.valid.eq(1),

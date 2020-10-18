@@ -8,6 +8,7 @@ from migen.genlib.io import CRG
 from litex.build.generic_platform import *
 from litex.build.sim import SimPlatform
 from litex.build.sim.config import SimConfig
+from litex.tools.litex_sim import SimSoC
 
 from litex.soc.interconnect import wishbone
 from litex.soc.integration.soc_core import *
@@ -109,47 +110,30 @@ class Platform(SimPlatform):
     def do_finalize(self, fragment):
         pass
 
-class SimSoC(SoCCore):
-    def __init__(self,
-                 with_udp=False,
-                 mac_address=0x10e2d5000000, ip_address="192.168.1.50",
-                 xgmii=False,
-                 xgmii_dw=32,
-                 platform=Platform(),
-                 **kwargs):
-        # platform = Platform()
-        sys_clk_freq = int(1e6)
-        SoCCore.__init__(self, platform, clk_freq=sys_clk_freq,
-                          ident="LiteX Simulation", ident_version=True,
-                          with_uart=False,
-                          **kwargs)
-        # crg
-        self.submodules.crg = CRG(platform.request("sys_clk"))
+# class SimSoC(SoCCore):
+#     def __init__(self,
+#                  with_udp=False,
+#                  mac_address=0x10e2d5000000, ip_address="192.168.1.50",
+#                  xgmii=False,
+#                  xgmii_dw=32,
+#                  platform=Platform(),
+#                  **kwargs):
+#         # platform = Platform()
+#         sys_clk_freq = int(1e6)
+#         SoCCore.__init__(self, platform, clk_freq=sys_clk_freq,
+#                          ident="LiteX Simulation", ident_version=True,
+#                          # with_uart=False,
+#                          **kwargs)
+#         # crg
+#         self.submodules.crg = CRG(platform.request("sys_clk"))
 
-        # serial
-        self.submodules.uart_phy = uart.RS232PHYModel(
-            platform.request("serial"))
-        self.submodules.uart = uart.UART(self.uart_phy)
-        self.add_csr("uart")
-        self.add_interrupt("uart")
+#         # serial
+#         self.submodules.uart_phy = uart.RS232PHYModel(
+#             platform.request("serial"))
+#         self.submodules.uart = uart.UART(self.uart_phy)
+#         self.add_csr("uart")
+#         self.add_interrupt("uart")
 
-        if with_udp:
-            # eth phy
-            if xgmii:
-                self.submodules.ethphy = LiteEthPHYXGMII(
-                    self.platform.request("eth_clocks", 0),
-                    self.platform.request("eth", 0),
-                    model=True,
-                    dw=xgmii_dw)
-                self.submodules.core = LiteEthUDPIPCore(
-                    self.ethphy, mac_address, convert_ip(ip_address),
-                    sys_clk_freq, dw=xgmii_dw)
-            else:
-                self.submodules.ethphy = LiteEthPHYModel(self.platform.request("eth", 0))
-                self.submodules.core = LiteEthUDPIPCore(
-                    self.ethphy, mac_address, convert_ip(ip_address),
-                    sys_clk_freq)
-            self.add_csr("ethphy")
             # udp ip
 
 def _udp_port(dw=32):
@@ -255,28 +239,32 @@ class UDPSimCore(SimSoC):
                  port,
                  with_etherbone=False,
                  xgmii=True,
-                 xgmii_dw=32,
+                 xgmii_dw=64,
                  **kwargs):
         if xgmii:
             XGMII_IO = xgmii_io(xgmii_dw) + sim_udp_port(xgmii_dw)
             platform = Platform(XGMII_IO)
-            SimSoC.__init__(self,
-                            with_udp=True,
-                            platform=platform,
-                            ip_address=ip_address,
-                            mac_address=mac_address,
-                            xgmii=xgmii,
-                            xgmii_dw=xgmii_dw,
-                            **kwargs)
         else:
             RGMII_IO = _io + sim_udp_port()
             platform = Platform(RGMII_IO)
-            SimSoC.__init__(self,
-                            ip_address=ip_address,
-                            mac_address=mac_address,
-                            with_udp=True,
-                            platform=platform,
-                            **kwargs)
+        SimSoC.__init__(self, platform=platform, **kwargs)
+
+        # eth phy
+        if xgmii:
+            self.submodules.ethphy = LiteEthPHYXGMII(
+                self.platform.request("eth_clocks", 0),
+                self.platform.request("eth", 0),
+                model=True,
+                dw=xgmii_dw)
+            self.submodules.core = LiteEthUDPIPCore(
+                self.ethphy, mac_address, convert_ip(ip_address),
+                self.sys_clk_freq, dw=xgmii_dw)
+        else:
+            self.submodules.ethphy = LiteEthPHYModel(self.platform.request("eth", 0))
+            self.submodules.core = LiteEthUDPIPCore(
+                self.ethphy, mac_address, convert_ip(ip_address),
+                self.sys_clk_freq)
+        self.add_csr("ethphy")
 
         udp_port = self.core.udp.crossbar.get_port(port, xgmii_dw if xgmii else 32)
 
@@ -331,22 +319,26 @@ class UDPSimCore(SimSoC):
                     udp_source.error.eq(udp_port.source.error)
                 ]
 
-                send_pkt = Signal(reset=0)
-                always_xmit = True
+                self.send_pkt = send_pkt = Signal(reset=0)
                 dw = xgmii_dw if xgmii else 32
                 shift = log2_int(dw // 8)  # bits required to represent bytes per word
-                if always_xmit:
-                    send_pkt_counter, send_pkt_counter_d = Signal(17), Signal()
-                    self.sync += [send_pkt_counter.eq(send_pkt_counter + 1),
-                                  send_pkt_counter_d.eq(send_pkt_counter[16]),
-                                  send_pkt.eq(send_pkt_counter_d ^ send_pkt_counter[16])]
+                self.send_pkt_counter = send_pkt_counter = Signal(17)
+                send_pkt_counter_d = Signal()
+                self.sync += [
+                    self.send_pkt_counter.eq(self.send_pkt_counter + 1),
+                    send_pkt_counter_d.eq(self.send_pkt_counter[16]),
+                    send_pkt.eq(send_pkt_counter_d ^ self.send_pkt_counter[16])
+                ]
 
                 sink_counter = Signal(16)
-                self.comb += [udp_sink.valid.eq(sink_counter > 0),
-                              udp_sink.last.eq(sink_counter == 1)]
-                self.sync += [If(send_pkt, sink_counter.eq(sink_length >> shift)),
-                              If((sink_counter > 0) & (udp_sink.ready == 1),
-                                 sink_counter.eq(sink_counter - 1))
+                self.comb += [
+                    udp_sink.valid.eq(sink_counter > 0),
+                    udp_sink.last.eq(sink_counter == 1)
+                ]
+                self.sync += [
+                    If(send_pkt, sink_counter.eq(sink_length >> shift)),
+                    If((sink_counter > 0) & (udp_sink.ready == 1),
+                       sink_counter.eq(sink_counter - 1))
                 ]
 
 
@@ -372,7 +364,7 @@ def main():
     if args.sim_only:
         soc_kwargs = soc_core_argdict(args)
         sim_config = SimConfig(default_clk="sys_clk")
-        sim_config.add_module("serial2console", "serial")
+        # sim_config.add_module("serial2console", "serial")
         # soc_kwargs = soc_core_argdict(args)
         soc_kwargs["integrated_main_ram_size"] = 0x10000
         sim_config.add_module(

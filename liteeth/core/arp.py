@@ -209,7 +209,7 @@ class LiteEthARPTable(Module):
         # This is for testing, when the Rx side isn't working
         # One can easily change the IP/MAC address of the network interface
         # to match this or vice versa.
-        cached_ip_address = Signal(32, reset=convert_ip("192.168.2.16"))
+        cached_ip_address = Signal(32, reset=convert_ip("10.1.0.4"))
         cached_mac_address = Signal(48, reset=0xb8599fb4405c)
         cached_timer = WaitTimer(clk_freq*10)
         self.submodules += cached_timer

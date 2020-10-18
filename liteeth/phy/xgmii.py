@@ -117,24 +117,23 @@ class LiteEthPHYXGMIIRX(Module):
 class LiteEthPHYXGMIICRG(Module, AutoCSR):
     def __init__(self, clock_pads, model=False):
         self._reset = CSRStorage()
-        self.clock_domains.cd_eth_rx = ClockDomain()
-        self.clock_domains.cd_eth_tx = ClockDomain()
+        self.clock_domains.cd_xgmii_eth_rx = ClockDomain()
+        self.clock_domains.cd_xgmii_eth_tx = ClockDomain()
         if model:
-            self.comb += [self.cd_eth_rx.clk.eq(ClockSignal()),
-                          self.cd_eth_tx.clk.eq(ClockSignal())
+            self.comb += [self.cd_xgmii_eth_rx.clk.eq(ClockSignal()),
+                          self.cd_xgmii_eth_tx.clk.eq(ClockSignal())
             ]
         else:
-            self.comb += [self.cd_eth_rx.clk.eq(clock_pads.rx),
-                          self.cd_eth_tx.clk.eq(clock_pads.tx)
+            self.comb += [self.cd_xgmii_eth_rx.clk.eq(clock_pads.rx),
+                          self.cd_xgmii_eth_tx.clk.eq(clock_pads.tx)
             ]
 
 
 class LiteEthPHYXGMII(Module, AutoCSR):
     def __init__(self, clock_pads, pads, model=False, dw=64, with_hw_init_reset=True):
         self.dw = dw
+        self.cd_eth_tx, self.cd_eth_rx = "xgmii_eth_tx", "xgmii_eth_rx"
         self.submodules.crg = LiteEthPHYXGMIICRG(clock_pads, model)
-        self.submodules.tx = ClockDomainsRenamer("eth_tx")(
-            LiteEthPHYXGMIITX(pads, self.dw))
-        self.submodules.rx = ClockDomainsRenamer("eth_rx")(
-            LiteEthPHYXGMIIRX(pads, self.dw))
+        self.submodules.tx = ClockDomainsRenamer(self.cd_eth_tx)(LiteEthPHYXGMIITX(pads, self.dw))
+        self.submodules.rx = ClockDomainsRenamer(self.cd_eth_rx)(LiteEthPHYXGMIIRX(pads, self.dw))
         self.sink, self.source = self.tx.sink, self.rx.source

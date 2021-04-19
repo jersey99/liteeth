@@ -168,7 +168,6 @@ class LiteEthPHYRGMIIRX(Module):
                     o_DATAOUT     = rx_data_idelay[i],
                 ),
                 Instance("ODELAYE3",
-                    p_DELAY_SRC        = "IDATAIN",
                     p_CASCADE          = "SLAVE_MIDDLE",
                     p_DELAY_TYPE       = "FIXED",
                     p_DELAY_VALUE      = int(rx_delay*1e12),

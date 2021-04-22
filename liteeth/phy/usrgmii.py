@@ -135,7 +135,7 @@ class LiteEthPHYRGMIIRX(Module):
                     p_UPDATE_MODE      = "ASYNC",
                     p_DELAY_FORMAT     = "TIME",
                     i_CASC_IN     = 0,
-                    i_CASC_RETURN = rx_d_CASC_d[i],
+                    i_CASC_RETURN = rx_d_CASC_b[i],
                     i_CE          = 0,
                     i_CLK         = 0,
                     i_INC         = 0,

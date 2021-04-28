@@ -21,6 +21,7 @@ class LiteEthPHYRGMIITX(Module):
 
         self.specials += [
             Instance("ODDRE1",
+                p_SIM_DEVICE       = "ULTRASCALE_PLUS",
                 i_C  = ClockSignal("eth_tx"),
                 i_SR = 0,
                 i_D1 = sink.valid,
@@ -34,6 +35,7 @@ class LiteEthPHYRGMIITX(Module):
         for i in range(4):
             self.specials += [
                 Instance("ODDRE1",
+                    p_SIM_DEVICE = "ULTRASCALE_PLUS",
                     i_C=ClockSignal("eth_tx"),
                     i_SR=0,
                     i_D1=sink.data[i],
@@ -76,6 +78,7 @@ class LiteEthPHYRGMIIRX(Module):
                 p_REFCLK_FREQUENCY = 300.0,
                 p_DELAY_FORMAT     = "TIME",
                 p_UPDATE_MODE      = "ASYNC",
+                p_SIM_DEVICE       = "ULTRASCALE_PLUS",
                 i_CASC_IN     = 0,
                 i_CASC_RETURN = rx_ctl_CASC_b,
                 i_CE          = 0,
@@ -96,6 +99,7 @@ class LiteEthPHYRGMIIRX(Module):
                 p_REFCLK_FREQUENCY = 300.0,
                 p_DELAY_FORMAT     = "TIME",
                 p_UPDATE_MODE      = "ASYNC",
+                p_SIM_DEVICE       = "ULTRASCALE_PLUS",
                 i_CASC_IN     = rx_ctl_CASC_a,
                 i_CASC_RETURN = 0,
                 i_CE          = 0,
@@ -134,6 +138,7 @@ class LiteEthPHYRGMIIRX(Module):
                     p_REFCLK_FREQUENCY = 300.0,
                     p_UPDATE_MODE      = "ASYNC",
                     p_DELAY_FORMAT     = "TIME",
+                    p_SIM_DEVICE       = "ULTRASCALE_PLUS",
                     i_CASC_IN     = 0,
                     i_CASC_RETURN = rx_d_CASC_b[i],
                     i_CE          = 0,
@@ -154,6 +159,7 @@ class LiteEthPHYRGMIIRX(Module):
                     p_REFCLK_FREQUENCY = 300.0,
                     p_DELAY_FORMAT     = "TIME",
                     p_UPDATE_MODE      = "ASYNC",
+                    p_SIM_DEVICE       = "ULTRASCALE_PLUS",
                     i_CASC_IN     = rx_d_CASC_a[i],
                     i_CASC_RETURN = 0,
                     i_CE          = 0,
@@ -226,6 +232,7 @@ class LiteEthPHYRGMIICRG(Module, AutoCSR):
         eth_tx_clk_obuf = Signal()
         self.specials += [
             Instance("ODDRE1",
+                p_SIM_DEVICE = "ULTRASCALE_PLUS",
                 i_C  = ClockSignal("eth_tx_delayed"),
                 i_SR = 0,
                 i_D1 = 1,

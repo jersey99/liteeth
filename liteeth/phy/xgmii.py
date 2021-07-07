@@ -130,9 +130,9 @@ class LiteEthPHYXGMIICRG(Module, AutoCSR):
 
 
 class LiteEthPHYXGMII(Module, AutoCSR):
-    def __init__(self, clock_pads, pads, model=False, dw=64, with_hw_init_reset=True):
+    def __init__(self, clock_pads, pads, cd_prefix, model=False, dw=64, with_hw_init_reset=True):
         self.dw = dw
-        self.cd_eth_tx, self.cd_eth_rx = "xgmii_eth_tx", "xgmii_eth_rx"
+        self.cd_eth_tx, self.cd_eth_rx = cd_prefix + "xgmii_eth_tx", cd_prefix + "xgmii_eth_rx"
         self.submodules.crg = LiteEthPHYXGMIICRG(clock_pads, model)
         self.submodules.tx = ClockDomainsRenamer(self.cd_eth_tx)(LiteEthPHYXGMIITX(pads, self.dw))
         self.submodules.rx = ClockDomainsRenamer(self.cd_eth_rx)(LiteEthPHYXGMIIRX(pads, self.dw))

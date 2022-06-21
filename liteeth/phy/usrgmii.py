@@ -116,6 +116,7 @@ class LiteEthPHYRGMIIRX(Module):
                     p_REFCLK_FREQUENCY = 300.0,
                     p_UPDATE_MODE      = "ASYNC",
                     p_DELAY_FORMAT     = "TIME",
+                    p_SIM_DEVICE       = "ULTRASCALE_PLUS" if usp else "ULTRASCALE",
                     i_CASC_IN     = 0,
                     i_CASC_RETURN = 0,
                     i_CE          = 0,

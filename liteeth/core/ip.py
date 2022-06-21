@@ -90,35 +90,148 @@ class LiteEthIPV4Packetizer(Packetizer):
             ipv4_header)
 
 
+class LiteEthIPV4Fragmenter(Module):
+    '''
+    IP Fragmenter that respects liteth.common.eth_mtu and breaking up data
+    from sink into multiple packets, by manipulating the source which is
+    tied into IPV4Packetizer
+    TODO:
+    1. Further investigate if the DELAY state is necessary.
+    2. IP_MTU calculation -30 seems pretty arbitrary, need to find refs
+    3. NextValue is it recommended?
+    '''
+    def __init__(self, dw=8):
+        self.sink = sink = stream.Endpoint(eth_ipv4_user_description(dw))
+        self.source = source = stream.Endpoint(eth_ipv4_user_description(dw))
+        self.comb += sink.connect(source)
+        ww = dw // 8
+        # counter logic ;)
+        counter = Signal(max=16384)
+        counter_reset = Signal()
+        counter_ce = Signal()
+        self.sync += \
+            If(counter_reset,
+                counter.eq(0)
+            ).Elif(counter_ce,
+                counter.eq(counter + ww)
+            )
+        self.mf = mf = Signal(reset=0)  # mf == More Fragments
+        self.fragment_offset = fragment_offset = Signal(13, reset=0)
+        self.identification = identification = Signal(16, reset=0)
+        bytes_in_fragment = Signal(16, reset=0)
+        # Making sure we only fragment in blocks of 8 bytes
+        IP_MTU = ((eth_mtu - 30 - ipv4_header_length) >> 3) << 3
+        self.submodules.fsm = fsm = FSM(reset_state="IDLE")
+        fsm.act("IDLE",
+                sink.ready.eq(1),
+                source.length.eq(sink.length),
+                If(sink.valid,
+                   If(sink.length < IP_MTU,
+                       NextValue(mf, 0),
+                       NextValue(fragment_offset, 0),
+                       NextValue(identification, 0),
+                       sink.connect(source)
+                   ).Else(
+                       sink.ready.eq(0),
+                       source.length.eq(bytes_in_fragment),
+                       counter_reset.eq(1),
+                       NextValue(mf, 1),
+                       NextValue(fragment_offset, 0),
+                       NextValue(identification, identification + 1),
+                       NextValue(bytes_in_fragment, IP_MTU),
+                       NextState("FRAGMENTED_PACKET_SEND")
+                   )
+                )
+            )
+
+        fsm.act("FRAGMENTED_PACKET_SEND",
+                sink.connect(source, omit={"length"}),
+                source.length.eq(bytes_in_fragment),
+                If(sink.valid & source.ready,
+                   counter_ce.eq(1)
+                ),
+                If(counter == (bytes_in_fragment - ww),
+                   NextValue(fragment_offset,
+                             fragment_offset + (bytes_in_fragment >> 3)),
+                   source.last.eq(1),
+                   source.last_be.eq(0x80),
+                   If(((fragment_offset << 3) + counter + ww) == sink.length,
+                      NextValue(fragment_offset, 0),
+                      NextState("IDLE")
+                   ).Else(
+                       counter_ce.eq(0),
+                       NextState("NEXT_FRAGMENT")
+                   )
+                )
+        )
+
+        fsm.act("NEXT_FRAGMENT",
+                counter_ce.eq(0),
+                sink.ready.eq(0),
+                source.valid.eq(0),
+                source.length.eq(bytes_in_fragment),
+                If((sink.length - (fragment_offset << 3)) > IP_MTU,
+                    NextValue(bytes_in_fragment, IP_MTU),
+                    counter_reset.eq(1)
+                ).Else(
+                    NextValue(bytes_in_fragment,
+                              sink.length - (fragment_offset << 3)),
+                    NextValue(mf, 0),
+                    counter_reset.eq(1)
+                ),
+                NextState("FRAGMENTED_PACKET_SEND")
+        )
+
+        fsm.act("FLUSH_PIPELINE",
+                counter_ce.eq(1),
+                sink.ready.eq(0),
+                source.valid.eq(0),
+                source.length.eq(bytes_in_fragment),
+                If(counter == (20 << 3),
+                   counter_ce.eq(0),
+                   counter_reset.eq(1),
+                   NextState("FRAGMENTED_PACKET_SEND")
+                )
+        )
+
+
+
 class LiteEthIPTX(Module):
-    def __init__(self, mac_address, ip_address, arp_table, dw=8):
+    def __init__(self, mac_address, ip_address, arp_table, dw=8, with_fragmenter=True):
         self.sink   = sink   = stream.Endpoint(eth_ipv4_user_description(dw))
         self.source = source = stream.Endpoint(eth_mac_description(dw))
         self.target_unreachable = Signal()
 
         # # #
+        # Fragmenter  .. TODO: Make it optional
+        self.submodules.ip_fragmenter = ip_fragmenter = LiteEthIPV4Fragmenter(dw)
 
         # Checksum.
         self.submodules.checksum = checksum = LiteEthIPV4Checksum(skip_checksum=True)
-        self.comb += checksum.ce.eq(sink.valid)
+        self.comb += checksum.ce.eq(ip_fragmenter.source.valid)
         self.comb += checksum.reset.eq(source.valid & source.last & source.ready)
 
         # Packetizer.
         self.submodules.packetizer = packetizer = LiteEthIPV4Packetizer(dw)
         self.comb += [
-            sink.connect(packetizer.sink, keep={
-                "last",
-                "last_be",
-                "protocol",
-                "data"}),
-            packetizer.sink.valid.eq(sink.valid & checksum.done),
-            sink.ready.eq(packetizer.sink.ready & checksum.done),
-            packetizer.sink.target_ip.eq(sink.ip_address),
-            packetizer.sink.total_length.eq(ipv4_header.length + sink.length),
+            sink.connect(ip_fragmenter.sink),
+
+            # ip_fragmenter.source.connect(packetizer.sink),
+
+            packetizer.sink.valid.eq(ip_fragmenter.source.valid & checksum.done),
+            packetizer.sink.last.eq(ip_fragmenter.source.last),
+            packetizer.sink.last_be.eq(ip_fragmenter.source.last_be),
+            ip_fragmenter.source.ready.eq(packetizer.sink.ready & checksum.done),
+            packetizer.sink.target_ip.eq(ip_fragmenter.source.ip_address),
+            packetizer.sink.protocol.eq(ip_fragmenter.source.protocol),
+            packetizer.sink.total_length.eq(ip_fragmenter.source.length + ipv4_header.length),
             packetizer.sink.version.eq(0x4),     # ipv4
-            packetizer.sink.ihl.eq(ipv4_header.length//4),
-            packetizer.sink.identification.eq(0),
+            packetizer.sink.ihl.eq(0x5),
+            packetizer.sink.identification.eq(ip_fragmenter.identification),
+            packetizer.sink.flags_offset.eq(Cat(ip_fragmenter.fragment_offset,
+                                                ip_fragmenter.mf)),
             packetizer.sink.ttl.eq(0x80),
+            packetizer.sink.data.eq(ip_fragmenter.source.data),
             packetizer.sink.sender_ip.eq(ip_address),
             checksum.header.eq(packetizer.header),
             packetizer.sink.checksum.eq(checksum.value)

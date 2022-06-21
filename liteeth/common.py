@@ -18,7 +18,7 @@ from litex.soc.interconnect.packet import Header, HeaderField
 
 # Ethernet Constants -------------------------------------------------------------------------------
 
-eth_mtu              = 1530
+eth_mtu              = 9000
 eth_min_frame_length = 64
 eth_fcs_length       = 4
 eth_interpacket_gap  = 12
@@ -73,6 +73,7 @@ ipv4_header_fields = {
     "version":        HeaderField(0,  4,  4),
     "total_length":   HeaderField(2,  0, 16),
     "identification": HeaderField(4,  0, 16),
+    "flags_offset":    HeaderField(6,  0, 16),
     "ttl":            HeaderField(8,  0,  8),
     "protocol":       HeaderField(9,  0,  8),
     "checksum":       HeaderField(10, 0, 16),

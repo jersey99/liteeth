@@ -287,8 +287,8 @@ class Depacketizer(Module):
             )
         )
 
-        self.sync += If(sink.valid & sink.ready, sink_d.eq(sink))
         if not aligned:
+            self.sync += If(sink.valid & sink.ready, sink_d.eq(sink))
             fsm.act("UNALIGNED-DATA-COPY",
                 source.valid.eq(sink.valid | sink_d.last),
                 source_last_a.eq(sink_d.last),

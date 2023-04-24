@@ -34,4 +34,7 @@ class LiteEthCrossbar(Module):
         cases["default"] = self.dispatcher.sel.eq(0)
         for i, (k, v) in enumerate(self.users.items()):
             cases[k] = self.dispatcher.sel.eq(2**i)
-        self.comb += Case(getattr(self.master.sink, self.dispatch_param), cases)
+        if type(self.dispatch_param) is list:
+            self.comb += Case(getattr(self.master.sink, Cat(*self.dispatch_param)), cases)
+        else:
+            self.comb += Case(getattr(self.master.sink, self.dispatch_param), cases)

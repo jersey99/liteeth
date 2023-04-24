@@ -26,6 +26,21 @@ class LiteEthMACPacketizer(Packetizer):
             eth_phy_description(dw),
             mac_header)
 
+class LiteEthMACVLANDepacketizer(Depacketizer):
+    def __init__(self, dw):
+        Depacketizer.__init__(self,
+            eth_mac_description(dw),
+            eth_mac_vlan_description(dw),
+            vlan_mac_header)
+
+
+class LiteEthMACVLANPacketizer(Packetizer):
+    def __init__(self, dw):
+        Packetizer.__init__(self,
+            eth_mac_vlan_description(dw),
+            eth_mac_description(dw),
+            vlan_mac_header)
+
 # MAC Ports ----------------------------------------------------------------------------------------
 
 class LiteEthMACMasterPort:
@@ -54,4 +69,16 @@ class LiteEthMACCrossbar(LiteEthCrossbar):
         if ethernet_type in self.users.keys():
             raise ValueError("Ethernet type {0:#x} already assigned".format(ethernet_type))
         self.users[ethernet_type] = port
+        return port
+
+
+class LiteEthMACVLANCrossbar(LiteEthCrossbar):
+    def __init__(self, dw=8):
+        LiteEthCrossbar.__init__(self, LiteEthMACMasterPort, ["vid", "ethernet_type"], dw)
+
+    def get_port(self, vid_ethernet_type, dw=8):
+        port = LiteEthMACUserPort(dw)
+        if vid_ethernet_type in self.users.keys():
+            raise ValueError("Ethernet type {0:#x} already assigned".format(vid_ethernet_type))
+        self.users[vid_ethernet_type] = port
         return port

@@ -22,6 +22,30 @@ class LiteEthIPCore(Module, AutoCSR):
         if with_icmp:
             self.submodules.icmp = LiteEthICMP(self.ip, ip_address, dw=dw)
 
+# VLAN CORE
+class LiteEthVLANUDPIPCore(Module, AutoCSR):
+    def __init__(self, phy, mac_address, ip_address, clk_freq, with_icmp=True, dw=8):
+        ip_address = convert_ip(ip_address)
+        self.submodules.mac = LiteEthMAC(phy, dw, interface="crossbar", with_preamble_crc=True)
+
+        self.submodules.arp = LiteEthARP(self.mac, mac_address, ip_address, clk_freq, dw=dw)
+        self.submodules.ip  = LiteEthIP(self.mac, mac_address, ip_address, self.arp.table, dw=dw)
+
+        vlan_mac_port = mac.crossbar.get_port(ethernet_8021q_tpid, dw=dw)
+
+        self.comb += [
+            tx.source.connect(mac_port.sink),
+            mac_port.source.connect(rx.sink)
+        ]
+
+        self.submodules.crossbar     = LiteEthMACCrossbar(dw)
+        self.comb += [
+            self.crossbar.master.source.connect(vlan_mac_port.sink),
+            vlan_mac_port.source.connect(self.crossbar.master.sink)
+        ]
+        if with_icmp:
+            self.submodules.icmp = LiteEthICMP(self.ip, ip_address, dw=dw)
+
 # UDP IP Core --------------------------------------------------------------------------------------
 
 class LiteEthUDPIPCore(LiteEthIPCore):

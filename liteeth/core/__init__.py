@@ -11,6 +11,8 @@ from liteeth.core.ip import LiteEthIP
 from liteeth.core.udp import LiteEthUDP
 from liteeth.core.icmp import LiteEthICMP
 
+from liteeth.mac.common import LiteEthMACVLANCrossbar, LiteEthMACVLANPacketizer, LiteEthMACVLANDepacketizer
+
 # IP Core ------------------------------------------------------------------------------------------
 
 class LiteEthIPCore(Module, AutoCSR):
@@ -31,20 +33,31 @@ class LiteEthVLANUDPIPCore(Module, AutoCSR):
         self.submodules.arp = LiteEthARP(self.mac, mac_address, ip_address, clk_freq, dw=dw)
         self.submodules.ip  = LiteEthIP(self.mac, mac_address, ip_address, self.arp.table, dw=dw)
 
-        vlan_mac_port = mac.crossbar.get_port(ethernet_8021q_tpid, dw=dw)
-
-        self.comb += [
-            tx.source.connect(mac_port.sink),
-            mac_port.source.connect(rx.sink)
-        ]
-
-        self.submodules.crossbar     = LiteEthMACCrossbar(dw)
-        self.comb += [
-            self.crossbar.master.source.connect(vlan_mac_port.sink),
-            vlan_mac_port.source.connect(self.crossbar.master.sink)
-        ]
         if with_icmp:
             self.submodules.icmp = LiteEthICMP(self.ip, ip_address, dw=dw)
+
+        self.submodules.udp = LiteEthUDP(self.ip, ip_address, dw=dw)
+
+        vlan_mac_port = self.mac.crossbar.get_port(ethernet_8021q_tpid, dw=dw)
+
+        self.submodules.crossbar     = LiteEthMACVLANCrossbar(dw)
+        self.submodules.packetizer   = LiteEthMACVLANPacketizer(dw)
+        # self.submodules.depacketizer = LiteEthMACVLANDepacketizer(dw)
+
+        # self.comb += [
+        #     vlan_mac_port.sink.ethernet_type.eq(ethernet_8021q_tpid),
+        #     self.crossbar.master.source.connect(self.packetizer.sink),
+        #     self.packetizer.source.connect(vlan_mac_port.sink, omit={'ethernet_type'}),
+        #     vlan_mac_port.source.connect(self.depacketizer.sink),
+        #     self.depacketizer.source.connect(self.crossbar.master.sink),
+        # ]
+        # vlan_ip_address = convert_ip("192.168.2.51")
+        # self.submodules.vlan_arp = LiteEthARP(self, mac_address, vlan_ip_address, clk_freq, dw=dw, vlan_id=2001)
+        # self.submodules.vlan_ip  = LiteEthIP(self, mac_address, vlan_ip_address, self.vlan_arp.table, dw=dw, vlan_id=2001)
+        # if with_icmp:
+        #     self.submodules.vlan_icmp = LiteEthICMP(self.vlan_ip, vlan_ip_address, dw=dw)
+
+        # self.submodules.vlan_udp = LiteEthUDP(self.vlan_ip, vlan_ip_address, dw=dw)
 
 # UDP IP Core --------------------------------------------------------------------------------------
 

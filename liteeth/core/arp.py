@@ -297,7 +297,7 @@ class LiteEthARPTable(Module):
 # ARP ----------------------------------------------------------------------------------------------
 
 class LiteEthARP(Module):
-    def __init__(self, mac, mac_address, ip_address, clk_freq, dw=8):
+    def __init__(self, mac, mac_address, ip_address, clk_freq, dw=8, vlan_id=False):
         self.submodules.tx    = tx    = LiteEthARPTX(mac_address, ip_address, dw)
         self.submodules.rx    = rx    = LiteEthARPRX(mac_address, ip_address, dw)
         self.submodules.table = table = LiteEthARPTable(clk_freq)
@@ -305,8 +305,18 @@ class LiteEthARP(Module):
             rx.source.connect(table.sink),
             table.source.connect(tx.sink)
         ]
-        mac_port = mac.crossbar.get_port(ethernet_type_arp, dw=dw)
-        self.comb += [
-            tx.source.connect(mac_port.sink),
-            mac_port.source.connect(rx.sink)
-        ]
+        if vlan_id:
+            assert(type(vlan_id) is int)
+            mac_port = mac.crossbar.get_port((vlan_id << 16) | ethernet_type_arp, dw=dw)
+            self.comb += [
+                mac_port.sink.vid.eq(vlan_id),
+                tx.source.connect(mac_port.sink),
+                mac_port.source.connect(rx.sink, omit={'dei', 'pcp', 'vid'})
+            ]
+
+        else:
+            mac_port = mac.crossbar.get_port(ethernet_type_arp, dw=dw)
+            self.comb += [
+                tx.source.connect(mac_port.sink),
+                mac_port.source.connect(rx.sink)
+            ]

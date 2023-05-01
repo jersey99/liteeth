@@ -72,12 +72,29 @@ class LiteEthMACCrossbar(LiteEthCrossbar):
         return port
 
 
+class LiteEthMACVLANMasterPort:
+    def __init__(self, dw):
+        self.source = stream.Endpoint(eth_mac_vlan_description(dw))
+        self.sink   = stream.Endpoint(eth_mac_vlan_description(dw))
+
+
+class LiteEthMACVLANSlavePort:
+    def __init__(self, dw):
+        self.sink   = stream.Endpoint(eth_mac_vlan_description(dw))
+        self.source = stream.Endpoint(eth_mac_vlan_description(dw))
+
+
+class LiteEthMACVLANUserPort(LiteEthMACVLANSlavePort):
+    def __init__(self, dw):
+        LiteEthMACVLANSlavePort.__init__(self, dw)
+
+
 class LiteEthMACVLANCrossbar(LiteEthCrossbar):
     def __init__(self, dw=8):
-        LiteEthCrossbar.__init__(self, LiteEthMACMasterPort, ["vid", "ethernet_type"], dw)
+        LiteEthCrossbar.__init__(self, LiteEthMACVLANMasterPort, ["vid", "ethernet_type"], dw)
 
     def get_port(self, vid_ethernet_type, dw=8):
-        port = LiteEthMACUserPort(dw)
+        port = LiteEthMACVLANUserPort(dw)
         if vid_ethernet_type in self.users.keys():
             raise ValueError("Ethernet type {0:#x} already assigned".format(vid_ethernet_type))
         self.users[vid_ethernet_type] = port

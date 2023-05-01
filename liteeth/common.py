@@ -41,8 +41,8 @@ mac_header = Header(mac_header_fields, mac_header_length, swap_field_bytes=True)
 
 vlan_mac_header_length = 4
 vlan_mac_header_fields = {
-    "pcp": HeaderField(0, 0, 3),
-    "dei": HeaderField(0, 3, 1),
+    # "pcp": HeaderField(0, 0, 3),
+    # "dei": HeaderField(0, 3, 1),
     "vid": HeaderField(0, 4, 12),
     "ethernet_type": HeaderField(2, 0, 16)
 }
@@ -193,6 +193,8 @@ def eth_mac_description(dw):
 
 def eth_mac_vlan_description(dw):
     payload_layout = vlan_mac_header.get_layout() + [
+        ("target_mac", 48),
+        ("sender_mac", 48),
         ("data",       dw),
         ("last_be", dw//8),
         ("error",   dw//8)

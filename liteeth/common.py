@@ -41,9 +41,7 @@ mac_header = Header(mac_header_fields, mac_header_length, swap_field_bytes=True)
 
 vlan_mac_header_length = 4
 vlan_mac_header_fields = {
-    # "pcp": HeaderField(0, 0, 3),
-    # "dei": HeaderField(0, 3, 1),
-    "vid": HeaderField(0, 4, 12),
+    "vid": HeaderField(0, 0, 16),
     "ethernet_type": HeaderField(2, 0, 16)
 }
 
@@ -56,6 +54,7 @@ arp_proto_ip        = 0x0800
 arp_opcode_request  = 0x0001
 arp_opcode_reply    = 0x0002
 arp_min_length      = eth_min_frame_length - eth_fcs_length - mac_header_length
+arp_vlan_min_length = eth_min_frame_length - eth_fcs_length - mac_header_length - vlan_mac_header_length
 
 arp_header_length   = 28
 arp_header_fields = {

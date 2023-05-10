@@ -30,13 +30,15 @@ class LiteEthARPPacketizer(Packetizer):
 
 
 class LiteEthARPTX(Module):
-    def __init__(self, mac_address, ip_address, dw=8):
+    def __init__(self, mac_address, ip_address, dw=8, vlan_id=False):
         self.sink   = sink   = stream.Endpoint(_arp_table_layout)
         self.source = source = stream.Endpoint(eth_mac_description(dw))
 
         # # #
-
-        packet_length = max(arp_header.length, arp_min_length)
+        if vlan_id:
+            packet_length = max(arp_header.length, arp_vlan_min_length)
+        else:
+            packet_length = max(arp_header.length, arp_min_length)
         packet_words  = packet_length//(dw//8)
         counter       = Signal(max=packet_words, reset_less=True)
 
@@ -298,7 +300,7 @@ class LiteEthARPTable(Module):
 
 class LiteEthARP(Module):
     def __init__(self, mac, mac_address, ip_address, clk_freq, dw=8, vlan_id=False):
-        self.submodules.tx    = tx    = LiteEthARPTX(mac_address, ip_address, dw)
+        self.submodules.tx    = tx    = LiteEthARPTX(mac_address, ip_address, dw, vlan_id=vlan_id)
         self.submodules.rx    = rx    = LiteEthARPRX(mac_address, ip_address, dw)
         self.submodules.table = table = LiteEthARPTable(clk_freq)
         self.comb += [

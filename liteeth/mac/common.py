@@ -91,7 +91,7 @@ class LiteEthMACVLANUserPort(LiteEthMACVLANSlavePort):
 
 class LiteEthMACVLANCrossbar(LiteEthCrossbar):
     def __init__(self, dw=8):
-        LiteEthCrossbar.__init__(self, LiteEthMACVLANMasterPort, ["vid", "ethernet_type"], dw)
+        LiteEthCrossbar.__init__(self, LiteEthMACVLANMasterPort, ["ethernet_type", "vid"], dw)
 
     def get_port(self, vid_ethernet_type, dw=8):
         port = LiteEthMACVLANUserPort(dw)

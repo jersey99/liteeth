@@ -72,7 +72,7 @@ class LiteEthVLANUDPIPCore(Module, AutoCSR):
 
         udp = LiteEthUDP(ip, vlan_ip_address, dw=self.dw)
         setattr(self.submodules, f"vlan_{vlan_id}_udp", udp)
-
+        return udp
 # UDP IP Core --------------------------------------------------------------------------------------
 
 class LiteEthUDPIPCore(LiteEthIPCore):

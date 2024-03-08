@@ -362,8 +362,8 @@ class LiteEthIPRX(Module):
 
 class LiteEthIP(Module):
     def __init__(self, mac, mac_address, ip_address, arp_table, dw=8, vlan_id=False):
-        self.submodules.tx = tx = LiteEthIPTX(mac_address, ip_address, arp_table, dw=dw)
-        self.submodules.rx = rx = stream.BufferizeEndpoints({"sink": stream.DIR_SINK})(LiteEthIPRX(mac_address, ip_address, dw=dw))
+        self.submodules.tx = tx = stream.BufferizeEndpoints({"sink": stream.DIR_SINK, "source": stream.DIR_SOURCE}, pipe_ready=True)(LiteEthIPTX(mac_address, ip_address, arp_table, dw=dw))
+        self.submodules.rx = rx = stream.BufferizeEndpoints({"sink": stream.DIR_SINK, "source": stream.DIR_SOURCE}, pipe_ready=True)(LiteEthIPRX(mac_address, ip_address, dw=dw))
         if vlan_id:
             assert(type(vlan_id) is int)
             mac_port = mac.crossbar.get_port((vlan_id << 16) | ethernet_type_ip, dw=dw)

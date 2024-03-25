@@ -46,9 +46,9 @@ class LiteEthVLANUDPIPCore(Module, AutoCSR):
 
         self.submodules.crossbar     = LiteEthMACVLANCrossbar(dw)
         self.submodules.packetizer   = stream.BufferizeEndpoints(
-            {"sink": stream.DIR_SINK, "source": stream.DIR_SOURCE}, pipe_ready=True)(LiteEthMACVLANPacketizer(dw))
+            {"sink": stream.DIR_SINK, "source": stream.DIR_SOURCE})(LiteEthMACVLANPacketizer(dw))
         self.submodules.depacketizer = stream.BufferizeEndpoints(
-            {"sink": stream.DIR_SINK, "source": stream.DIR_SOURCE}, pipe_ready=True)(LiteEthMACVLANDepacketizer(dw))
+            {"sink": stream.DIR_SINK, "source": stream.DIR_SOURCE})(LiteEthMACVLANDepacketizer(dw))
 
         self.comb += [
             vlan_mac_port.sink.ethernet_type.eq(ethernet_8021q_tpid),

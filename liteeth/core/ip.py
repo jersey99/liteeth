@@ -124,7 +124,6 @@ class LiteEthIPV4Fragmenter(Module):
         self.submodules.fsm = fsm = FSM(reset_state="IDLE")
         fsm.act("IDLE",
                 sink.ready.eq(1),
-                source.length.eq(sink.length),
                 If(sink.valid,
                    If(sink.length < IP_MTU,
                        NextValue(mf, 0),
@@ -133,7 +132,6 @@ class LiteEthIPV4Fragmenter(Module):
                        sink.connect(source)
                    ).Else(
                        sink.ready.eq(0),
-                       source.length.eq(bytes_in_fragment),
                        counter_reset.eq(1),
                        NextValue(mf, 1),
                        NextValue(fragment_offset, 0),

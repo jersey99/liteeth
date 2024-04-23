@@ -124,6 +124,7 @@ class LiteEthIPV4Fragmenter(Module):
         self.submodules.fsm = fsm = FSM(reset_state="IDLE")
         fsm.act("IDLE",
                 sink.ready.eq(1),
+                source.length.eq(sink.length),
                 If(sink.valid,
                    If(sink.length < IP_MTU,
                        NextValue(mf, 0),
@@ -203,7 +204,7 @@ class LiteEthIPTX(Module):
         # # #
         # Fragmenter  .. TODO: Make it optional
         self.submodules.ip_fragmenter = ip_fragmenter = stream.BufferizeEndpoints(
-            {"sink": stream.DIR_SINK, "source": stream.DIR_SOURCE})(LiteEthIPV4Fragmenter(dw))
+            {"source": stream.DIR_SOURCE})(LiteEthIPV4Fragmenter(dw))
 
         # Checksum.
         self.submodules.checksum = checksum = LiteEthIPV4Checksum(skip_checksum=True)

@@ -204,7 +204,8 @@ class LiteEthIPTX(Module):
 
         # # #
         # Fragmenter  .. TODO: Make it optional
-        self.submodules.ip_fragmenter = ip_fragmenter = LiteEthIPV4Fragmenter(dw)
+        self.submodules.ip_fragmenter = ip_fragmenter = stream.BufferizeEndpoints(
+            {"sink": stream.DIR_SINK, "source": stream.DIR_SOURCE})(LiteEthIPV4Fragmenter(dw))
 
         # Checksum.
         self.submodules.checksum = checksum = LiteEthIPV4Checksum(skip_checksum=True)

@@ -187,7 +187,7 @@ class LiteEthARPTable(Module):
                 request_ip_address.eq(request.ip_address)
             )
 
-        request_timer = WaitTimer(clk_freq//10)
+        request_timer = WaitTimer(clk_freq)
         self.submodules += request_timer
         request_counter       = Signal(max=max_requests)
         request_counter_reset = Signal()

@@ -308,7 +308,8 @@ class LiteEthIPRX(Module):
         # # #
 
         # Depacketizer.
-        self.submodules.depacketizer = depacketizer = LiteEthIPV4Depacketizer(dw)
+        self.submodules.depacketizer = depacketizer = stream.BufferizeEndpoints(
+            {"sink": stream.DIR_SINK})(LiteEthIPV4Depacketizer(dw))
         self.comb += sink.connect(depacketizer.sink)
 
         # Checksum.

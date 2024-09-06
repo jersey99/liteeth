@@ -83,7 +83,7 @@ class LiteEthMACCore(Module, AutoCSR):
 
             def add_crc(self):
                 tx_crc = crc.LiteEthMACCRC32Inserter(eth_phy_description(datapath_dw))
-                tx_crc = BufferizeEndpoints({"sink": DIR_SINK})(tx_crc) # FIXME: Still required?
+                tx_crc = BufferizeEndpoints({"sink": DIR_SINK}, {"source": DIR_SOURCE})(tx_crc) # FIXME: Still required?
                 tx_crc = ClockDomainsRenamer(cd_tx)(tx_crc)
                 self.submodules += tx_crc
                 self.pipeline.append(tx_crc)
@@ -204,7 +204,7 @@ class LiteEthMACCore(Module, AutoCSR):
             rx_datapath.add_cdc()
         if with_preamble_crc:
             rx_datapath.add_preamble()
-            rx_datapath.add_crc()
+            # rx_datapath.add_crc()
         if with_padding:
             rx_datapath.add_padding()
         if not with_sys_datapath:

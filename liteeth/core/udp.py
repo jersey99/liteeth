@@ -214,7 +214,8 @@ class LiteEthUDPRX(Module):
 
 class LiteEthUDP(Module):
     def __init__(self, ip, ip_address, dw=8):
-        self.submodules.tx = tx = LiteEthUDPTX(ip_address, dw)
+        self.submodules.tx = tx = stream.BufferizeEndpoints(
+            {"sink": stream.DIR_SINK})LiteEthUDPTX(ip_address, dw)
         self.submodules.rx = rx = LiteEthUDPRX(ip_address, dw)
         ip_port = ip.crossbar.get_port(udp_protocol, dw)
         self.comb += [

@@ -9,9 +9,9 @@ from liteeth.common import *
 # Steam 2 UDP TX -----------------------------------------------------------------------------------
 
 class LiteEthStream2UDPTX(Module):
-    def __init__(self, ip_address, udp_port, fifo_depth=None, send_level=1):
-        self.sink   = sink   = stream.Endpoint(eth_tty_description(8))
-        self.source = source = stream.Endpoint(eth_udp_user_description(8))
+    def __init__(self, ip_address, udp_port, fifo_depth=None, send_level=1, dw=8):
+        self.sink   = sink   = stream.Endpoint(eth_tty_description(dw))
+        self.source = source = stream.Endpoint(eth_udp_user_description(dw))
 
         # # #
 
@@ -31,7 +31,7 @@ class LiteEthStream2UDPTX(Module):
             level   = Signal(max=fifo_depth+1)
             counter = Signal(max=fifo_depth+1)
 
-            self.submodules.fifo = fifo = stream.SyncFIFO([("data", 8)], fifo_depth)
+            self.submodules.fifo = fifo = stream.SyncFIFO([("data", dw)], fifo_depth)
             self.comb += sink.connect(fifo.sink)
 
             self.submodules.fsm = fsm = FSM(reset_state="IDLE")
@@ -62,9 +62,9 @@ class LiteEthStream2UDPTX(Module):
 # UDP to Stream RX ---------------------------------------------------------------------------------
 
 class LiteEthUDP2StreamRX(Module):
-    def __init__(self, ip_address, udp_port, fifo_depth=None):
-        self.sink   = sink   = stream.Endpoint(eth_udp_user_description(8))
-        self.source = source = stream.Endpoint(eth_tty_description(8))
+    def __init__(self, ip_address, udp_port, fifo_depth=None, dw=8):
+        self.sink   = sink   = stream.Endpoint(eth_udp_user_description(dw))
+        self.source = source = stream.Endpoint(eth_tty_description(dw))
 
         # # #
 
@@ -81,7 +81,7 @@ class LiteEthUDP2StreamRX(Module):
                 source.valid.eq(sink.valid & valid),
             ]
         else:
-            self.submodules.fifo = fifo = stream.SyncFIFO([("data", 8)], fifo_depth)
+            self.submodules.fifo = fifo = stream.SyncFIFO([("data", dw)], fifo_depth)
             self.comb += [
                 sink.connect(fifo.sink, keep={"last", "ready", "data"}),
                 fifo.sink.valid.eq(sink.valid & valid),
@@ -91,10 +91,10 @@ class LiteEthUDP2StreamRX(Module):
 # UDP Streamer -------------------------------------------------------------------------------------
 
 class LiteEthUDPStreamer(Module):
-    def __init__(self, udp, ip_address, udp_port, rx_fifo_depth=64, tx_fifo_depth=64):
+    def __init__(self, udp, ip_address, udp_port, rx_fifo_depth=64, tx_fifo_depth=64, dw=8):
         self.submodules.tx = tx = LiteEthStream2UDPTX(ip_address, udp_port, tx_fifo_depth)
         self.submodules.rx = rx = LiteEthUDP2StreamRX(ip_address, udp_port, rx_fifo_depth)
-        udp_port = udp.crossbar.get_port(udp_port, dw=8)
+        udp_port = udp.crossbar.get_port(udp_port, dw=dw)
         self.comb += [
             tx.source.connect(udp_port.sink),
             udp_port.source.connect(rx.sink)

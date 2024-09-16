@@ -185,6 +185,8 @@ class LiteEthMACCore(Module, AutoCSR):
                 self.pipeline.append(rx_converter)
 
             def add_cdc(self):
+                if core_dw == 64:
+                    return
                 rx_cdc = stream.ClockDomainCrossing(eth_phy_description(core_dw),
                     cd_from = "eth_rx",
                     cd_to   = "sys",

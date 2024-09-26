@@ -526,7 +526,7 @@ class LiteEthPHYXGMIIRX(Module):
         # cases. This means delaying the incoming data by one cycle.
         xgmii_bus_layout = [ ("ctl", 8), ("data", 64) ]
         xgmii_bus_next = Record(xgmii_bus_layout)
-        self.comb += [
+        self.sync += [
             xgmii_bus_next.ctl.eq(self.aligner.aligned_ctl),
             xgmii_bus_next.data.eq(self.aligner.aligned_data),
         ]

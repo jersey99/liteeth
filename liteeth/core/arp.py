@@ -301,7 +301,8 @@ class LiteEthARPTable(Module):
 class LiteEthARP(Module):
     def __init__(self, mac, mac_address, ip_address, clk_freq, dw=8, vlan_id=False):
         self.submodules.tx    = tx    = LiteEthARPTX(mac_address, ip_address, dw, vlan_id=vlan_id)
-        self.submodules.rx    = rx    = LiteEthARPRX(mac_address, ip_address, dw)
+        self.submodules.rx    = rx    = stream.BufferizeEndpoints(
+            {"sink": stream.DIR_SINK})(LiteEthARPRX(mac_address, ip_address, dw))
         self.submodules.table = table = LiteEthARPTable(clk_freq)
         self.comb += [
             rx.source.connect(table.sink),

@@ -214,7 +214,7 @@ class LiteEthIPTX(Module):
 
         # Packetizer.
         self.submodules.packetizer = packetizer = stream.BufferizeEndpoints(
-            {"sink": stream.DIR_SINK})(LiteEthIPV4Packetizer(dw))
+            {"sink": stream.DIR_SINK,}, pipe_ready=True)(LiteEthIPV4Packetizer(dw))
         self.comb += [
             sink.connect(ip_fragmenter.sink),
 

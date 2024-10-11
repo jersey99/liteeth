@@ -1,11 +1,14 @@
 #
 # This file is part of LiteEth.
 #
-# Copyright (c) 2019-2023 Florent Kermarrec <florent@enjoy-digital.fr>
-# Copyright (c) 2020 Shawn Hoffman <godisgovernment@gmail.com>
+# Copyright (c) 2023 Icenowy Zheng <uwu@icenowy.me>
+# Based on ecp5rgmii.py, which is:
+#   Copyright (c) 2019-2023 Florent Kermarrec <florent@enjoy-digital.fr>
+#   Copyright (c) 2020 Shawn Hoffman <godisgovernment@gmail.com>
+#
 # SPDX-License-Identifier: BSD-2-Clause
 
-# RGMII PHY for ECP5 Lattice FPGA
+# RGMII PHY for Gowin GW5A FPGA
 
 from migen import *
 from migen.genlib.resetsync import AsyncResetSynchronizer
@@ -35,11 +38,16 @@ class LiteEthPHYRGMIITX(LiteXModule):
                 i2  = sink.valid,
                 o   = tx_ctl_oddrx1f,
             ),
-            Instance("DELAYG",
-                p_DEL_MODE  = "SCLK_ALIGNED",
-                p_DEL_VALUE = 0,
-                i_A         = tx_ctl_oddrx1f,
-                o_Z         = pads.tx_ctl,
+            Instance("IODELAY",
+                p_DYN_DLY_EN   = "FALSE",
+                p_ADAPT_EN     = "FALSE",
+                p_C_STATIC_DLY = 0,
+                i_SDTAP        = 0,
+                i_DLYSTEP      = Constant(0, 8),
+                i_VALUE        = 0,
+                i_DI           = tx_ctl_oddrx1f,
+                o_DF           = Open(),
+                o_DO           = pads.tx_ctl,
             )
         ]
         for i in range(4):
@@ -50,11 +58,16 @@ class LiteEthPHYRGMIITX(LiteXModule):
                     i2  = sink.data[4+i],
                     o   = tx_data_oddrx1f[i],
                 ),
-                Instance("DELAYG",
-                    p_DEL_MODE  = "SCLK_ALIGNED",
-                    p_DEL_VALUE = 0,
-                    i_A         = tx_data_oddrx1f[i],
-                    o_Z         = pads.tx_data[i],
+                Instance("IODELAY",
+                    p_DYN_DLY_EN   = "FALSE",
+                    p_ADAPT_EN     = "FALSE",
+                    p_C_STATIC_DLY = 0,
+                    i_SDTAP        = 0,
+                    i_DLYSTEP      = Constant(0, 8),
+                    i_VALUE        = 0,
+                    i_DI           = tx_data_oddrx1f[i],
+                    o_DF           = Open(),
+                    o_DO           = pads.tx_data[i],
                 )
             ]
         self.comb += sink.ready.eq(1)
@@ -62,60 +75,50 @@ class LiteEthPHYRGMIITX(LiteXModule):
 # LiteEth PHY RGMII RX -----------------------------------------------------------------------------
 
 class LiteEthPHYRGMIIRX(LiteXModule):
-    def __init__(self, pads, rx_delay=2e-9, with_inband_status=True):
+    def __init__(self, pads, rx_delay=2e-9):
         self.source = source = stream.Endpoint(eth_phy_description(8))
-
-        if with_inband_status:
-            self.inband_status = CSRStatus(fields=[
-                CSRField("link_status", size=1, values=[
-                    ("``0b0``", "Link down."),
-                    ("``0b1``", "Link up."),
-                ]),
-                CSRField("clock_speed", size=2, values=[
-                    ("``0b00``", "2.5MHz   (10Mbps)."),
-                    ("``0b01``", "25MHz   (100MBps)."),
-                    ("``0b10``", "125MHz (1000MBps)."),
-                ]),
-                CSRField("duplex_status", size=1, values=[
-                    ("``0b0``", "Half-duplex."),
-                    ("``0b1``", "Full-duplex."),
-                ]),
-            ])
 
         # # #
 
-        rx_delay_taps = int(rx_delay/25e-12) # 25ps per tap
-        assert rx_delay_taps < 128
+        rx_delay_taps = int(rx_delay/12.5e-12) # 12.5ps per tap
+        assert rx_delay_taps < 256
 
         rx_ctl_delayf  = Signal()
-        rx_ctl         = Signal(2)
-        rx_ctl_reg     = Signal(2)
+        rx_ctl         = Signal()
         rx_data_delayf = Signal(4)
         rx_data        = Signal(8)
-        rx_data_reg    = Signal(8)
 
         self.specials += [
-            Instance("DELAYG",
-                p_DEL_MODE  = "SCLK_ALIGNED",
-                p_DEL_VALUE = rx_delay_taps,
-                i_A         = pads.rx_ctl,
-                o_Z         = rx_ctl_delayf,
+            Instance("IODELAY",
+                p_DYN_DLY_EN   = "FALSE",
+                p_ADAPT_EN     = "FALSE",
+                p_C_STATIC_DLY = rx_delay_taps,
+                i_SDTAP        = 0,
+                i_DLYSTEP      = Constant(0, 8),
+                i_VALUE        = 0,
+                i_DI           = pads.rx_ctl,
+                o_DF           = Open(),
+                o_DO           = rx_ctl_delayf,
             ),
             DDRInput(
                 clk = ClockSignal("eth_rx"),
                 i   = rx_ctl_delayf,
-                o1  = rx_ctl[0],
-                o2  = rx_ctl[1],
+                o1  = rx_ctl,
+                o2  = Open()
             )
         ]
-        self.sync += rx_ctl_reg.eq(rx_ctl)
         for i in range(4):
             self.specials += [
-                Instance("DELAYG",
-                    p_DEL_MODE  = "SCLK_ALIGNED",
-                    p_DEL_VALUE = rx_delay_taps,
-                    i_A         = pads.rx_data[i],
-                    o_Z         = rx_data_delayf[i]),
+                Instance("IODELAY",
+                    p_DYN_DLY_EN   = "FALSE",
+                    p_ADAPT_EN     = "FALSE",
+                    p_C_STATIC_DLY = rx_delay_taps,
+                    i_SDTAP        = 0,
+                    i_DLYSTEP      = Constant(0, 8),
+                    i_VALUE        = 0,
+                    i_DI           = pads.rx_data[i],
+                    o_DF           = Open(),
+                    o_DO           = rx_data_delayf[i]),
                 DDRInput(
                     clk = ClockSignal("eth_rx"),
                     i   = rx_data_delayf[i],
@@ -123,27 +126,17 @@ class LiteEthPHYRGMIIRX(LiteXModule):
                     o2  = rx_data[i+4],
                 )
             ]
-        self.sync += rx_data_reg.eq(rx_data)
 
-        rx_ctl_reg_d = Signal(2)
-        self.sync += rx_ctl_reg_d.eq(rx_ctl_reg)
+        rx_ctl_d = Signal()
+        self.sync += rx_ctl_d.eq(rx_ctl)
 
         last = Signal()
-        self.comb += last.eq(~rx_ctl_reg[0] & rx_ctl_reg_d[0])
+        self.comb += last.eq(~rx_ctl & rx_ctl_d)
         self.sync += [
-            source.valid.eq(rx_ctl_reg[0]),
-            source.data.eq(rx_data_reg)
+            source.valid.eq(rx_ctl),
+            source.data.eq(rx_data)
         ]
         self.comb += source.last.eq(last)
-
-        if with_inband_status:
-            self.sync += [
-                If(rx_ctl == 0b00,
-                    self.inband_status.fields.link_status.eq(  rx_data[0]),
-                    self.inband_status.fields.clock_speed.eq(  rx_data[1:3]),
-                    self.inband_status.fields.duplex_status.eq(rx_data[3]),
-                )
-            ]
 
 # LiteEth PHY RGMII CRG ----------------------------------------------------------------------------
 
@@ -155,18 +148,19 @@ class LiteEthPHYRGMIICRG(LiteXModule):
 
         # RX Clock
         self.cd_eth_rx = ClockDomain()
-        self.comb += self.cd_eth_rx.clk.eq(clock_pads.rx)
+        self.cd_eth_rx.clk = clock_pads.rx
 
         # TX Clock
         self.cd_eth_tx = ClockDomain()
         if isinstance(tx_clk, Signal):
             self.comb += self.cd_eth_tx.clk.eq(tx_clk)
         else:
-            self.comb += self.cd_eth_tx.clk.eq(self.cd_eth_rx.clk)
+            self.cd_eth_tx.clk = self.cd_eth_rx.clk
 
-        tx_delay_taps = int(tx_delay/25e-12) # 25ps per tap
-        assert tx_delay_taps < 128
+        tx_delay_taps = int(tx_delay/12.5e-12) # 12.5ps per tap
+        assert tx_delay_taps < 256
 
+        self._txdelay_taps = CSRStorage(8, reset=tx_delay_taps)
         eth_tx_clk_o = Signal()
         self.specials += [
             DDROutput(
@@ -175,11 +169,16 @@ class LiteEthPHYRGMIICRG(LiteXModule):
                 i2  = 0,
                 o   = eth_tx_clk_o,
             ),
-            Instance("DELAYG",
-                p_DEL_MODE  = "SCLK_ALIGNED",
-                p_DEL_VALUE = tx_delay_taps,
-                i_A         = eth_tx_clk_o,
-                o_Z         = clock_pads.tx,
+            Instance("IODELAY",
+                p_DYN_DLY_EN   = "TRUE",
+                p_ADAPT_EN     = "FALSE",
+                p_C_STATIC_DLY = tx_delay_taps,
+                i_DI           = eth_tx_clk_o,
+                i_DLYSTEP      = self._txdelay_taps.storage,
+                i_SDTAP        = 1,
+                i_VALUE        = 0, # FIXME
+                o_DF           = Open(),
+                o_DO           = clock_pads.tx,
             )
         ]
 
@@ -205,12 +204,11 @@ class LiteEthPHYRGMII(LiteXModule):
     def __init__(self, clock_pads, pads, with_hw_init_reset=True,
         tx_delay           = 2e-9,
         rx_delay           = 2e-9,
-        with_inband_status = True,
         tx_clk             = None,
         ):
         self.crg = LiteEthPHYRGMIICRG(clock_pads, pads, with_hw_init_reset, tx_delay, tx_clk)
         self.tx  = ClockDomainsRenamer("eth_tx")(LiteEthPHYRGMIITX(pads))
-        self.rx  = ClockDomainsRenamer("eth_rx")(LiteEthPHYRGMIIRX(pads, rx_delay, with_inband_status))
+        self.rx  = ClockDomainsRenamer("eth_rx")(LiteEthPHYRGMIIRX(pads, rx_delay))
         self.sink, self.source = self.tx.sink, self.rx.source
 
         if hasattr(pads, "mdc"):

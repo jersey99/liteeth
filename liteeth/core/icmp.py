@@ -1,12 +1,14 @@
 #
 # This file is part of LiteEth.
 #
-# Copyright (c) 2015-2020 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2015-2023 Florent Kermarrec <florent@enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
-from liteeth.common import *
+from litex.gen import *
 
 from litex.soc.interconnect.packet import PacketFIFO
+
+from liteeth.common import *
 from liteeth.packet import Depacketizer, Packetizer
 
 # ICMP TX ------------------------------------------------------------------------------------------
@@ -16,10 +18,11 @@ class LiteEthICMPPacketizer(Packetizer):
         Packetizer.__init__(self,
             eth_icmp_description(dw),
             eth_ipv4_user_description(dw),
-            icmp_header)
+            icmp_header
+        )
 
 
-class LiteEthICMPTX(Module):
+class LiteEthICMPTX(LiteXModule):
     def __init__(self, ip_address, dw=8):
         self.sink   = sink   = stream.Endpoint(eth_icmp_user_description(dw))
         self.source = source = stream.Endpoint(eth_ipv4_user_description(dw))
@@ -27,7 +30,7 @@ class LiteEthICMPTX(Module):
         # # #
 
         # Packetizer.
-        self.submodules.packetizer = packetizer = LiteEthICMPPacketizer(dw)
+        self.packetizer = packetizer = LiteEthICMPPacketizer(dw)
         self.comb += sink.connect(packetizer.sink, keep={
             "valid",
             "last",
@@ -37,10 +40,11 @@ class LiteEthICMPTX(Module):
             "checksum",
             "quench",
             "data",
-            "last_be"})
+            "last_be"
+        })
 
         # FSM.
-        self.submodules.fsm = fsm = FSM(reset_state="IDLE")
+        self.fsm = fsm = FSM(reset_state="IDLE")
         fsm.act("IDLE",
             If(packetizer.source.valid,
                 NextState("SEND")
@@ -69,7 +73,7 @@ class LiteEthICMPDepacketizer(Depacketizer):
             icmp_header)
 
 
-class LiteEthICMPRX(Module):
+class LiteEthICMPRX(LiteXModule):
     def __init__(self, ip_address, dw=8):
         self.sink   = sink   = stream.Endpoint(eth_ipv4_user_description(dw))
         self.source = source = stream.Endpoint(eth_icmp_user_description(dw))
@@ -77,11 +81,11 @@ class LiteEthICMPRX(Module):
         # # #
 
         # Depacketizer.
-        self.submodules.depacketizer = depacketizer = LiteEthICMPDepacketizer(dw)
+        self.depacketizer = depacketizer = LiteEthICMPDepacketizer(dw)
         self.comb += sink.connect(depacketizer.sink)
 
         # FSM.
-        self.submodules.fsm = fsm = FSM(reset_state="IDLE")
+        self.fsm = fsm = FSM(reset_state="IDLE")
         fsm.act("IDLE",
             If(depacketizer.source.valid,
                 NextState("DROP"),
@@ -101,7 +105,8 @@ class LiteEthICMPRX(Module):
                 "quench",
                 "data",
                 "error",
-                "last_be"}),
+                "last_be"
+            }),
             source.ip_address.eq(sink.ip_address),
             source.length.eq(sink.length - icmp_header.length),
         ]
@@ -124,20 +129,26 @@ class LiteEthICMPRX(Module):
 
 # ICMP Echo ----------------------------------------------------------------------------------------
 
-class LiteEthICMPEcho(Module):
-    def __init__(self, dw=8):
+class LiteEthICMPEcho(LiteXModule):
+    def __init__(self, dw=8, fifo_depth=128):
         self.sink   = sink   = stream.Endpoint(eth_icmp_user_description(dw))
         self.source = source = stream.Endpoint(eth_icmp_user_description(dw))
 
         # # #
 
-        self.submodules.buffer = stream.SyncFIFO(
-            eth_icmp_user_description(dw),
-            128 // (dw // 8),
-            buffered=True
+        self.buffer = PacketFIFO(eth_icmp_user_description(dw),
+            payload_depth = fifo_depth//(dw//8),
+            param_depth   = 1,
+            buffered      = True
         )
         self.comb += [
-            sink.connect(self.buffer.sink),
+            # Connect to buffer when length <= buffer's depth.
+            If(sink.length <= fifo_depth,
+                sink.connect(self.buffer.sink)
+            # Else drop.
+            ).Else(
+                sink.ready.eq(1)
+            ),
             self.buffer.source.connect(source, omit={"checksum"}),
             self.source.msgtype.eq(icmp_type_ping_reply),
             self.source.checksum.eq(self.buffer.source.checksum + 0x800 + (self.buffer.source.checksum >= 0xf800))
@@ -145,11 +156,11 @@ class LiteEthICMPEcho(Module):
 
 # ICMP ---------------------------------------------------------------------------------------------
 
-class LiteEthICMP(Module):
-    def __init__(self, ip, ip_address, dw=8):
-        self.submodules.tx   = tx   = LiteEthICMPTX(ip_address, dw)
-        self.submodules.rx   = rx   = LiteEthICMPRX(ip_address, dw)
-        self.submodules.echo = echo = LiteEthICMPEcho(dw)
+class LiteEthICMP(LiteXModule):
+    def __init__(self, ip, ip_address, dw=8, fifo_depth=128):
+        self.tx   = tx   = LiteEthICMPTX(ip_address, dw)
+        self.rx   = rx   = LiteEthICMPRX(ip_address, dw)
+        self.echo = echo = LiteEthICMPEcho(dw, fifo_depth=fifo_depth)
         self.comb += [
             rx.source.connect(echo.sink),
             echo.source.connect(tx.sink)

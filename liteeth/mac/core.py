@@ -5,11 +5,11 @@
 # Copyright (c) 2015-2017 Sebastien Bourdeauducq <sb@m-labs.hk>
 # Copyright (c) 2021 David Sawatzke <d-git@sawatzke.dev>
 # Copyright (c) 2017-2018 whitequark <whitequark@whitequark.org>
+# Copyright (c) 2023 LumiGuide Fietsdetectie B.V. <goemansrowan@gmail.com>
 # SPDX-License-Identifier: BSD-2-Clause
 
 from liteeth.common import *
 from liteeth.mac import gap, preamble, crc, padding, last_be
-from liteeth.phy.model import LiteEthPHYModel
 
 from migen.genlib.cdc import PulseSynchronizer
 
@@ -19,9 +19,14 @@ from litex.soc.interconnect.stream import BufferizeEndpoints, DIR_SOURCE, DIR_SI
 
 class LiteEthMACCore(Module, AutoCSR):
     def __init__(self, phy, dw,
-                 with_sys_datapath = False,
-                 with_preamble_crc = True,
-                 with_padding      = True):
+        with_sys_datapath = False,
+        with_preamble_crc = True,
+        with_padding      = True,
+        tx_cdc_depth      = 32,
+        tx_cdc_buffered   = False,
+        rx_cdc_depth      = 32,
+        rx_cdc_buffered   = False,
+        ):
 
         # Endpoints.
         self.sink   = stream.Endpoint(eth_phy_description(dw))
@@ -40,8 +45,12 @@ class LiteEthMACCore(Module, AutoCSR):
             cd_tx       = "eth_tx"
             cd_rx       = "eth_rx"
             datapath_dw = phy_dw
-        if isinstance(phy, LiteEthPHYModel):
-            with_preamble_crc = False # Disable Preamble/CRC with PHY Model for direct connection to the Ethernet tap.
+
+        # If the PHY specifies preamble, CRC, or padding behavior, use it.
+        if hasattr(phy, "with_preamble_crc"):
+            with_preamble_crc = phy.with_preamble_crc
+        if hasattr(phy, "with_padding"):
+            with_padding = phy.with_padding
 
         # CSRs.
         if with_preamble_crc:
@@ -56,8 +65,10 @@ class LiteEthMACCore(Module, AutoCSR):
             def add_cdc(self):
                 tx_cdc = stream.ClockDomainCrossing(eth_phy_description(core_dw),
                     cd_from = "sys",
-                    cd_to   = "eth_tx",
-                    depth   = 32)
+                    cd_to   = "sys" if core_dw == 64 else "eth_tx",
+                    depth    = tx_cdc_depth,
+                    buffered = tx_cdc_buffered,
+                )
                 self.submodules += tx_cdc
                 self.pipeline.append(tx_cdc)
 
@@ -124,7 +135,7 @@ class LiteEthMACCore(Module, AutoCSR):
                 tx_datapath.add_converter()
             if core_dw != 8:
                 tx_datapath.add_last_be()
-        # Gap insertion has to occurr in phy tx domain to ensure gap is correctly maintained
+        # Gap insertion has to occurr in phy tx domain to ensure gap is correctly maintained.
         if not getattr(phy, "integrated_ifg_inserter", False):
             tx_datapath.add_gap()
         tx_datapath.pipeline.append(phy)
@@ -184,9 +195,11 @@ class LiteEthMACCore(Module, AutoCSR):
 
             def add_cdc(self):
                 rx_cdc = stream.ClockDomainCrossing(eth_phy_description(core_dw),
-                    cd_from = "eth_rx",
+                    cd_from = "sys" if core_dw == 64 else "eth_rx",
                     cd_to   = "sys",
-                    depth   = 32)
+                    depth    = rx_cdc_depth,
+                    buffered = rx_cdc_buffered,
+                )
                 self.submodules += rx_cdc
                 self.pipeline.append(rx_cdc)
 

@@ -70,6 +70,11 @@ arp_header_fields = {
 }
 arp_header = Header(arp_header_fields, arp_header_length, swap_field_bytes=True)
 
+# Broadcast Constants ------------------------------------------------------------------------------
+
+bcast_ip_mask     = 0xff
+bcast_mac_address = 0xffffffffffff
+
 # Multicast Constants ------------------------------------------------------------------------------
 
 mcast_oui     = C(0x01005e, 24)
@@ -94,11 +99,11 @@ ipv4_header = Header(ipv4_header_fields, ipv4_header_length, swap_field_bytes=Tr
 
 # ICMP Constants/Header ----------------------------------------------------------------------------
 
-icmp_protocol      = 0x01
-icmp_type_ping_reply = 0
+icmp_protocol          = 0x01
+icmp_type_ping_reply   = 0
 icmp_type_ping_request = 8
-icmp_header_length = 8
-icmp_header_fields = {
+icmp_header_length     = 8
+icmp_header_fields     = {
     "msgtype":  HeaderField(0, 0,  8),
     "code":     HeaderField(1, 0,  8),
     "checksum": HeaderField(2, 0, 16),
@@ -333,6 +338,10 @@ def eth_etherbone_mmap_description(dw):
     return EndpointDescription(payload_layout, param_layout)
 
 # TTY
-def eth_tty_description(dw):
+def eth_tty_tx_description(dw):
     payload_layout = [("data", dw)]
+    return EndpointDescription(payload_layout)
+
+def eth_tty_rx_description(dw):
+    payload_layout = [("data", dw), ("error", 1)]
     return EndpointDescription(payload_layout)

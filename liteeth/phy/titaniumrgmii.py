@@ -5,7 +5,7 @@
 # Copyright (c) 2015-2023 Florent Kermarrec <florent@enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
-# RGMII PHY for Trion Efinix FPGA
+# RGMII PHY for Titanium Efinix FPGA
 
 from migen import *
 from migen.genlib.resetsync import AsyncResetSynchronizer
@@ -36,7 +36,7 @@ class LiteEthPHYRGMIITX(LiteXModule):
                 i1  = tx_data_h[i],
                 i2  = tx_data_l[i],
                 o   = pads.tx_data[i],
-                clk = ClockSignal("eth_tx")
+                clk = ClockSignal("eth_tx"),
             )
 
         # TX Ctl IOs.
@@ -47,7 +47,7 @@ class LiteEthPHYRGMIITX(LiteXModule):
             i1  = tx_ctl_h,
             i2  = tx_ctl_l,
             o   = pads.tx_ctl,
-            clk = ClockSignal("eth_tx")
+            clk = ClockSignal("eth_tx"),
         )
 
         # Logic.
@@ -80,7 +80,7 @@ class LiteEthPHYRGMIIRX(LiteXModule):
                 i   = pads.rx_data[i],
                 o1  = rx_data_h[i],
                 o2  = rx_data_l[i],
-                clk = ClockSignal("eth_rx")
+                clk = ClockSignal("eth_rx"),
             )
 
         # RX Ctl IOs.
@@ -91,7 +91,7 @@ class LiteEthPHYRGMIIRX(LiteXModule):
             i   = pads.rx_ctl,
             o1  = rx_ctl_h,
             o2  = rx_ctl_l,
-            clk = ClockSignal("eth_rx")
+            clk = ClockSignal("eth_rx"),
         )
 
         rx_ctl   = rx_ctl_h
@@ -143,11 +143,11 @@ class LiteEthPHYRGMIICRG(LiteXModule):
 
         # TX PLL.
         # -------
-        self.pll = pll = TRIONPLL(platform)
+        self.pll = pll = TITANIUMPLL(platform)
         pll.register_clkin(self.cd_eth_rx.clk,    freq=125e6)
-        pll.create_clkout(self.cd_eth_rx,         freq=125e6, phase=0,  with_reset=False, is_feedback=True)
+        pll.create_clkout(self.cd_eth_rx,         freq=125e6, phase=0,  with_reset=False)
         pll.create_clkout(self.cd_eth_tx,         freq=125e6, phase=0,  with_reset=False)
-        pll.create_clkout(self.cd_eth_tx_delayed, freq=125e6, phase=45)
+        pll.create_clkout(self.cd_eth_tx_delayed, freq=125e6, phase=90)
 
         # Reset.
         # ------

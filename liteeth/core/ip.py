@@ -1,8 +1,10 @@
 #
 # This file is part of LiteEth.
 #
-# Copyright (c) 2015-2020 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2015-2023 Florent Kermarrec <florent@enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
+
+from litex.gen import *
 
 from liteeth.common import *
 from liteeth.crossbar import LiteEthCrossbar
@@ -45,7 +47,7 @@ class LiteEthIPV4Crossbar(LiteEthCrossbar):
 
 @ResetInserter()
 @CEInserter()
-class LiteEthIPV4Checksum(Module):
+class LiteEthIPV4Checksum(LiteXModule):
     def __init__(self, words_per_clock_cycle=1, skip_checksum=False):
         self.header = Signal(ipv4_header.length*8)
         self.value  = Signal(16)
@@ -87,7 +89,8 @@ class LiteEthIPV4Packetizer(Packetizer):
         Packetizer.__init__(self,
             eth_ipv4_description(dw),
             eth_mac_description(dw),
-            ipv4_header)
+            ipv4_header
+        )
 
 
 class LiteEthIPV4Fragmenter(Module):
@@ -197,7 +200,8 @@ class LiteEthIPV4Fragmenter(Module):
 
 
 class LiteEthIPTX(Module):
-    def __init__(self, mac_address, ip_address, arp_table, dw=8, with_fragmenter=True):
+    def __init__(self, mac_address, ip_address, arp_table, dw=8, with_fragmenter=True, with_buffer=True):
+
         self.sink   = sink   = stream.Endpoint(eth_ipv4_user_description(dw))
         self.source = source = stream.Endpoint(eth_mac_description(dw))
         self.target_unreachable = Signal()
@@ -206,6 +210,12 @@ class LiteEthIPTX(Module):
         # Fragmenter  .. TODO: Make it optional
         self.submodules.ip_fragmenter = ip_fragmenter = stream.BufferizeEndpoints(
             {"sink": stream.DIR_SINK})(LiteEthIPV4Fragmenter(dw))
+
+        # Buffer.
+        if with_buffer:
+            self.buffer = buffer = stream.Buffer(eth_ipv4_user_description(dw))
+            self.comb += sink.connect(buffer.sink)
+            sink = buffer.source
 
         # Checksum.
         self.submodules.checksum = checksum = LiteEthIPV4Checksum(skip_checksum=True)
@@ -242,12 +252,18 @@ class LiteEthIPTX(Module):
         target_mac = Signal(48, reset_less=True)
 
         # FSM.
-        self.submodules.fsm = fsm = FSM(reset_state="IDLE")
+        self.fsm = fsm = FSM(reset_state="IDLE")
         fsm.act("IDLE",
             If(packetizer.source.valid,
-                If(sink.ip_address[28:] == mcast_ip_mask,
+                # Broadcast.
+                If(sink.ip_address[0:8] == bcast_ip_mask,
+                    NextValue(target_mac, bcast_mac_address),
+                    NextState("SEND")
+                # Multicast.
+                ).Elif(sink.ip_address[28:] == mcast_ip_mask,
                     NextValue(target_mac, Cat(sink.ip_address[:23], 0, mcast_oui)),
                     NextState("SEND")
+                # Unicast.
                 ).Else(
                     NextState("SEND_MAC_ADDRESS_REQUEST")
                 )
@@ -297,11 +313,12 @@ class LiteEthIPV4Depacketizer(Depacketizer):
         Depacketizer.__init__(self,
             eth_mac_description(dw),
             eth_ipv4_description(dw),
-            ipv4_header)
+            ipv4_header
+        )
 
 
-class LiteEthIPRX(Module):
-    def __init__(self, mac_address, ip_address, dw=8):
+class LiteEthIPRX(LiteXModule):
+    def __init__(self, mac_address, ip_address, with_broadcast=True, dw=8):
         self.sink   = sink   = stream.Endpoint(eth_mac_description(dw))
         self.source = source = stream.Endpoint(eth_ipv4_user_description(dw))
 
@@ -313,7 +330,7 @@ class LiteEthIPRX(Module):
         self.comb += sink.connect(depacketizer.sink)
 
         # Checksum.
-        self.submodules.checksum = checksum = LiteEthIPV4Checksum(skip_checksum=False)
+        self.checksum = checksum = LiteEthIPV4Checksum(skip_checksum=False)
         self.comb += [
             checksum.header.eq(depacketizer.header),
             checksum.reset.eq(~depacketizer.source.valid),
@@ -321,11 +338,11 @@ class LiteEthIPRX(Module):
         ]
 
         # FSM.
-        self.submodules.fsm = fsm = FSM(reset_state="IDLE")
+        self.fsm = fsm = FSM(reset_state="IDLE")
         fsm.act("IDLE",
             If(depacketizer.source.valid & checksum.done,
                 NextState("DROP"),
-                If((depacketizer.source.target_ip == ip_address) &
+                If(((depacketizer.source.target_ip == ip_address) | with_broadcast) &
                    (depacketizer.source.version == 0x4) &
                    (depacketizer.source.ihl == 0x5) &
                    (checksum.value == 0),
@@ -340,7 +357,7 @@ class LiteEthIPRX(Module):
                 "data",
                 "error",
                 "last_be"}),
-            source.length.eq(depacketizer.source.total_length - (0x5*4)),
+            source.length.eq(depacketizer.source.total_length - ipv4_header_length),
             source.ip_address.eq(depacketizer.source.sender_ip),
         ]
         fsm.act("RECEIVE",
@@ -363,9 +380,9 @@ class LiteEthIPRX(Module):
 # IP -----------------------------------------------------------------------------------------------
 
 class LiteEthIP(Module):
-    def __init__(self, mac, mac_address, ip_address, arp_table, dw=8, vlan_id=False):
+    def __init__(self, mac, mac_address, ip_address, arp_table, dw=8, with_broadcast=True, vlan_id=False):
         self.submodules.tx = tx = LiteEthIPTX(mac_address, ip_address, arp_table, dw=dw)
-        self.submodules.rx = rx = LiteEthIPRX(mac_address, ip_address, dw=dw)
+        self.submodules.rx = rx = LiteEthIPRX(mac_address, ip_address, with_broadcast, dw=dw)
         if vlan_id:
             assert(type(vlan_id) is int)
             mac_port = mac.crossbar.get_port((vlan_id << 16) | ethernet_type_ip, dw=dw)

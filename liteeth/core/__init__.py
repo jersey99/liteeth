@@ -2,27 +2,84 @@
 # This file is part of LiteEth.
 #
 # Copyright (c) 2015-2020 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2023 LumiGuide Fietsdetectie B.V. <goemansrowan@gmail.com>
 # SPDX-License-Identifier: BSD-2-Clause
 
-from liteeth.common import *
-from liteeth.mac import LiteEthMAC
-from liteeth.core.arp import LiteEthARP
-from liteeth.core.ip import LiteEthIP
-from liteeth.core.udp import LiteEthUDP
+from litex.gen import *
+
+from liteeth.common    import *
+from liteeth.mac       import LiteEthMAC
+from liteeth.core.arp  import LiteEthARP
+from liteeth.core.ip   import LiteEthIP
+from liteeth.core.udp  import LiteEthUDP
 from liteeth.core.icmp import LiteEthICMP
 
 from liteeth.mac.common import LiteEthMACVLANCrossbar, LiteEthMACVLANPacketizer, LiteEthMACVLANDepacketizer
 
 # IP Core ------------------------------------------------------------------------------------------
 
-class LiteEthIPCore(Module, AutoCSR):
-    def __init__(self, phy, mac_address, ip_address, clk_freq, with_icmp=True, dw=8):
+class LiteEthIPCore(LiteXModule):
+    def __init__(self, phy, mac_address, ip_address, clk_freq, arp_entries=1, dw=8,
+        with_icmp         = True, icmp_fifo_depth=128,
+        with_ip_broadcast = True,
+        with_sys_datapath = False,
+        tx_cdc_depth      = 32,
+        tx_cdc_buffered   = True,
+        rx_cdc_depth      = 32,
+        rx_cdc_buffered   = True,
+        interface         = "crossbar",
+        endianness        = "big",
+    ):
+        # Parameters.
+        # -----------
         ip_address = convert_ip(ip_address)
-        self.submodules.mac = LiteEthMAC(phy, dw, interface="crossbar", with_preamble_crc=True)
-        self.submodules.arp = LiteEthARP(self.mac, mac_address, ip_address, clk_freq, dw=dw)
-        self.submodules.ip  = LiteEthIP(self.mac, mac_address, ip_address, self.arp.table, dw=dw)
+
+        # MAC.
+        # ----
+        self.mac = LiteEthMAC(
+            phy               = phy,
+            dw                = dw,
+            interface         = interface,
+            endianness        = endianness,
+            hw_mac            = mac_address,
+            with_preamble_crc = True,
+            with_sys_datapath = with_sys_datapath,
+            tx_cdc_depth      = tx_cdc_depth,
+            tx_cdc_buffered   = tx_cdc_buffered,
+            rx_cdc_depth      = rx_cdc_depth,
+            rx_cdc_buffered   = rx_cdc_buffered
+        )
+
+        # ARP.
+        # ----
+        self.arp = LiteEthARP(
+            mac         = self.mac,
+            mac_address = mac_address,
+            ip_address  = ip_address,
+            clk_freq    = clk_freq,
+            entries     = arp_entries,
+            dw          = dw,
+        )
+
+        # IP.
+        # ---
+        self.ip  = LiteEthIP(
+            mac            = self.mac,
+            mac_address    = mac_address,
+            ip_address     = ip_address,
+            arp_table      = self.arp.table,
+            with_broadcast = with_ip_broadcast,
+            dw             = dw,
+        )
+        # ICMP (Optional).
+        # ----------------
         if with_icmp:
-            self.submodules.icmp = LiteEthICMP(self.ip, ip_address, dw=dw)
+            self.icmp = LiteEthICMP(
+                ip         = self.ip,
+                ip_address = ip_address,
+                dw         = dw,
+                fifo_depth = icmp_fifo_depth,
+            )
 
 # VLAN CORE
 class LiteEthVLANUDPIPCore(Module, AutoCSR):
@@ -78,8 +135,45 @@ class LiteEthVLANUDPIPCore(Module, AutoCSR):
 # UDP IP Core --------------------------------------------------------------------------------------
 
 class LiteEthUDPIPCore(LiteEthIPCore):
-    def __init__(self, phy, mac_address, ip_address, clk_freq, with_icmp=True, dw=8):
+    def __init__(self, phy, mac_address, ip_address, clk_freq, arp_entries=1, dw=8,
+        with_icmp         = True, icmp_fifo_depth=128,
+        with_ip_broadcast = True,
+        with_sys_datapath = False,
+        tx_cdc_depth      = 32,
+        tx_cdc_buffered   = True,
+        rx_cdc_depth      = 32,
+        rx_cdc_buffered   = True,
+        interface         = "crossbar",
+        endianness        = "big",
+    ):
+        # Parameters.
+        # -----------
         ip_address = convert_ip(ip_address)
-        LiteEthIPCore.__init__(self, phy, mac_address, ip_address, clk_freq, dw=dw,
-                               with_icmp=with_icmp)
-        self.submodules.udp = LiteEthUDP(self.ip, ip_address, dw=dw)
+
+        # Core: MAC + ARP + IP + (ICMP).
+        # ------------------------------
+        LiteEthIPCore.__init__(self,
+            phy               = phy,
+            mac_address       = mac_address,
+            ip_address        = ip_address,
+            clk_freq          = clk_freq,
+            arp_entries       = arp_entries,
+            with_icmp         = with_icmp,
+            icmp_fifo_depth   = icmp_fifo_depth,
+            dw                = dw,
+            interface         = interface,
+            endianness        = endianness,
+            with_ip_broadcast = with_ip_broadcast,
+            with_sys_datapath = with_sys_datapath,
+            tx_cdc_depth      = tx_cdc_depth,
+            tx_cdc_buffered   = tx_cdc_buffered,
+            rx_cdc_depth      = rx_cdc_depth,
+            rx_cdc_buffered   = rx_cdc_buffered,
+        )
+        # UDP.
+        # ----
+        self.udp = LiteEthUDP(
+            ip         = self.ip,
+            ip_address = ip_address,
+            dw         = dw,
+        )

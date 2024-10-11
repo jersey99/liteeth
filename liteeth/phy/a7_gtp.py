@@ -11,11 +11,11 @@ from math import ceil
 from migen import *
 from migen.genlib.cdc import MultiReg, PulseSynchronizer
 
-__all__ = ["QPLLSettings", "QPLLChannel", "QPLL", "GTPTxInit", "GTPRxInit"]
-
+# QPLL Settings ------------------------------------------------------------------------------------
 
 QPLLSettings = namedtuple("QPLLSettings", "refclksel fbdiv fbdiv_45 refclk_div")
 
+# QPLL Channel -------------------------------------------------------------------------------------
 
 class QPLLChannel:
     def __init__(self, index):
@@ -25,9 +25,12 @@ class QPLLChannel:
         self.clk    = Signal()
         self.refclk = Signal()
 
+# QPLL ---------------------------------------------------------------------------------------------
 
 class QPLL(Module):
-    def __init__(self, gtrefclk0, qpllsettings0, gtrefclk1=0, qpllsettings1=None):
+    def __init__(self,
+        gtrefclk0=0, qpllsettings0=None, gtgrefclk0=0,
+        gtrefclk1=0, qpllsettings1=None, gtgrefclk1=1):
         self.channels = []
 
         channel_settings = dict()
@@ -52,18 +55,20 @@ class QPLL(Module):
                 add_setting("o_PLLXOUTCLK",      channel.clk)
                 add_setting("o_PLLXOUTREFCLK",   channel.refclk)
 
-        self.specials += \
-            Instance("GTPE2_COMMON",
-                i_GTREFCLK0    = gtrefclk0,
-                i_GTREFCLK1    = gtrefclk1,
-                i_BGBYPASSB    = 1,
-                i_BGMONITORENB = 1,
-                i_BGPDB        = 1,
-                i_BGRCALOVRD   = 0b11111,
-                i_RCALENB      = 1,
-                **channel_settings
-            )
+        self.specials += Instance("GTPE2_COMMON",
+            i_GTREFCLK0    = gtrefclk0,
+            i_GTREFCLK1    = gtrefclk1,
+            i_GTGREFCLK0   = gtgrefclk0,
+            i_GTGREFCLK1   = gtgrefclk1,
+            i_BGBYPASSB    = 1,
+            i_BGMONITORENB = 1,
+            i_BGPDB        = 1,
+            i_BGRCALOVRD   = 0b11111,
+            i_RCALENB      = 1,
+            **channel_settings
+        )
 
+# GTP Tx Init --------------------------------------------------------------------------------------
 
 class GTPTxInit(Module):
     def __init__(self, sys_clk_freq):
@@ -85,9 +90,9 @@ class GTPTxInit(Module):
         self.specials += MultiReg(self.qpll_lock, qpll_lock)
 
         # After configuration, transceiver resets have to stay low for
-        # at least 500ns.
+        # at least 500ns (Here extended to 10us).
         # See https://www.xilinx.com/support/answers/43482.html
-        timer_max = ceil(500e-9*sys_clk_freq)
+        timer_max = ceil(10e-6*sys_clk_freq)
         timer     = Signal(max=timer_max+1)
         tick      = Signal()
         self.sync += [
@@ -123,6 +128,7 @@ class GTPTxInit(Module):
             self.done.eq(1)
         )
 
+# GTP Rx Init --------------------------------------------------------------------------------------
 
 # RX Reset Sequence Requirement for Production Silicon:  https://www.xilinx.com/support/answers/53561.html
 class GTPRxInit(Module):

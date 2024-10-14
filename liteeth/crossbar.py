@@ -32,7 +32,6 @@ class LiteEthCrossbar(LiteXModule):
         # RX dispatch
         sources = [port.source for port in self.users.values()]
         self.dispatcher = Dispatcher(self.master.sink, sources, one_hot=True)
-        dispatch_sig = getattr(self.master.sink, self.dispatch_param)
         cases = {}
         for i, (k, v) in enumerate(self.users.items()):
             cases[k] = self.dispatcher.sel.eq(2**i)

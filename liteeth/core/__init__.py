@@ -84,7 +84,7 @@ class LiteEthIPCore(LiteXModule):
             )
 
 # VLAN CORE
-class LiteEthVLANUDPIPCore(Module, AutoCSR):
+class LiteEthVLANUDPIPCore(LiteXModule):
     def __init__(self, phy, mac_address, ip_address, clk_freq, with_icmp=True, dw=8):
         self.mac_address = mac_address
         self.with_icmp = with_icmp

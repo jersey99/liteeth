@@ -17,7 +17,7 @@ from litex.soc.interconnect.stream import BufferizeEndpoints, DIR_SOURCE, DIR_SI
 
 # MAC Core -----------------------------------------------------------------------------------------
 
-class LiteEthMACCore(Module, AutoCSR):
+class LiteEthMACCore(LiteXModule):
     def __init__(self, phy, dw,
         with_sys_datapath = False,
         with_preamble_crc = True,
@@ -58,7 +58,7 @@ class LiteEthMACCore(Module, AutoCSR):
 
         # TX Data-Path (Core --> PHY).
         # ------------------------------------------------------------------------------------------
-        class TXDatapath(Module, AutoCSR):
+        class TXDatapath(LiteXModule):
             def __init__(self):
                 self.pipeline = []
 
@@ -143,7 +143,7 @@ class LiteEthMACCore(Module, AutoCSR):
 
         # RX Data-Path (PHY --> Core).
         # ------------------------------------------------------------------------------------------
-        class RXDatapath(Module, AutoCSR):
+        class RXDatapath(LiteXModule):
             def __init__(self):
                 self.pipeline = []
                 if with_preamble_crc:

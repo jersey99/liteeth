@@ -30,7 +30,7 @@ class LiteEthARPPacketizer(Packetizer):
         )
 
 
-class LiteEthARPTX(Module):
+class LiteEthARPTX(LiteXModule):
     def __init__(self, mac_address, ip_address, dw=8, vlan_id=False):
         self.sink   = sink   = stream.Endpoint(_arp_table_layout)
         self.source = source = stream.Endpoint(eth_mac_description(dw))

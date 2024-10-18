@@ -93,7 +93,7 @@ class LiteEthIPV4Packetizer(Packetizer):
         )
 
 
-class LiteEthIPV4Fragmenter(Module):
+class LiteEthIPV4Fragmenter(LiteXModule):
     '''
     IP Fragmenter that respects liteth.common.eth_mtu and breaking up data
     from sink into multiple packets, by manipulating the source which is
@@ -199,7 +199,7 @@ class LiteEthIPV4Fragmenter(Module):
 
 
 
-class LiteEthIPTX(Module):
+class LiteEthIPTX(LiteXModule):
     def __init__(self, mac_address, ip_address, arp_table, dw=8, with_fragmenter=True, with_buffer=True):
 
         self.sink   = sink   = stream.Endpoint(eth_ipv4_user_description(dw))
@@ -379,7 +379,7 @@ class LiteEthIPRX(LiteXModule):
 
 # IP -----------------------------------------------------------------------------------------------
 
-class LiteEthIP(Module):
+class LiteEthIP(LiteXModule):
     def __init__(self, mac, mac_address, ip_address, arp_table, dw=8, with_broadcast=True, vlan_id=False):
         self.submodules.tx = tx = LiteEthIPTX(mac_address, ip_address, arp_table, dw=dw)
         self.submodules.rx = rx = LiteEthIPRX(mac_address, ip_address, with_broadcast, dw=dw)

@@ -217,7 +217,7 @@ class LiteEthMACCore(LiteXModule):
             rx_datapath.add_cdc()
         if with_preamble_crc:
             rx_datapath.add_preamble()
-            # rx_datapath.add_crc()
+            rx_datapath.add_crc()
         if with_padding:
             rx_datapath.add_padding()
         if not with_sys_datapath:

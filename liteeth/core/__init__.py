@@ -94,7 +94,7 @@ class LiteEthVLANUDPIPCore(LiteXModule):
         self.submodules.mac = LiteEthMAC(phy, dw, interface="crossbar", with_preamble_crc=True)
 
         self.submodules.arp = LiteEthARP(self.mac, mac_address, ip_address, clk_freq, dw=dw)
-        self.submodules.ip  = LiteEthIP(self.mac, mac_address, ip_address, self.arp.table, dw=dw, with_ip_broadcast=False)
+        self.submodules.ip  = LiteEthIP(self.mac, mac_address, ip_address, self.arp.table, dw=dw, with_broadcast=False)
 
         if with_icmp:
             self.submodules.icmp = LiteEthICMP(self.ip, ip_address, dw=dw)

@@ -84,7 +84,7 @@ class LiteEthIPCore(LiteXModule):
             )
 
 # VLAN CORE
-class LiteEthVLANUDPIPCore(LiteXModule):
+class LiteEthVLANUDPIPCore(Module):
     def __init__(self, phy, mac_address, ip_address, clk_freq, with_icmp=True, dw=8):
         self.mac_address = mac_address
         self.with_icmp = with_icmp
@@ -129,7 +129,7 @@ class LiteEthVLANUDPIPCore(LiteXModule):
         setattr(self.submodules, f"vlan_{vlan_id}_ip", ip)
         if self.with_icmp:
             icmp = LiteEthICMP(ip, vlan_ip_address, dw=self.dw)
-            setattr(self.submodules, f"vlan_{vlan_id}_ip", icmp)
+            setattr(self.submodules, f"vlan_{vlan_id}_icmp", icmp)
 
         udp = LiteEthUDP(ip, vlan_ip_address, dw=self.dw)
         setattr(self.submodules, f"vlan_{vlan_id}_udp", udp)

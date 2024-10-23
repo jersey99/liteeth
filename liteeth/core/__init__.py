@@ -84,7 +84,7 @@ class LiteEthIPCore(LiteXModule):
             )
 
 # VLAN CORE
-class LiteEthVLANUDPIPCore(Module):
+class LiteEthVLANUDPIPCore(LiteXModule):
     def __init__(self, phy, mac_address, ip_address, clk_freq, with_icmp=True, dw=8):
         self.mac_address = mac_address
         self.with_icmp = with_icmp
@@ -94,7 +94,7 @@ class LiteEthVLANUDPIPCore(Module):
         self.submodules.mac = LiteEthMAC(phy, dw, interface="crossbar", with_preamble_crc=True)
 
         self.submodules.arp = LiteEthARP(self.mac, mac_address, ip_address, clk_freq, dw=dw)
-        self.submodules.ip  = LiteEthIP(self.mac, mac_address, ip_address, self.arp.table, dw=dw)
+        self.submodules.ip  = LiteEthIP(self.mac, mac_address, ip_address, self.arp.table, dw=dw, with_ip_broadcast=False)
 
         if with_icmp:
             self.submodules.icmp = LiteEthICMP(self.ip, ip_address, dw=dw)

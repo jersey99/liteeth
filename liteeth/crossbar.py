@@ -30,12 +30,11 @@ class LiteEthCrossbar(Module):
         # RX dispatch
         sources = [port.source for port in self.users.values()]
         self.submodules.dispatcher = Dispatcher(self.master.sink, sources, one_hot=True)
-        cases = {}
-        cases["default"] = self.dispatcher.sel.eq(0)
-        for i, (k, v) in enumerate(self.users.items()):
-            cases[k] = self.dispatcher.sel.eq(2**i)
         if type(self.dispatch_param) is list:
             params = [getattr(self.master.sink, param) for param in self.dispatch_param]
-            self.comb += Case(Cat(*params), cases)
+            dispatch_sig = Cat(*params)
         else:
-            self.comb += Case(getattr(self.master.sink, self.dispatch_param), cases)
+            dispatch_sig = getattr(self.master.sink, self.dispatch_param)
+
+        for i, (k, v) in enumerate(self.users.items()):
+            self.comb += If(dispatch_sig == k, self.dispatcher.sel.eq(2**i))

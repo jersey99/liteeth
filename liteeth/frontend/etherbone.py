@@ -188,6 +188,7 @@ class LiteEthEtherboneRecordReceiver(Module):
 
         # # #
 
+        assert buffer_depth <= 256
         self.submodules.fifo = fifo = PacketFIFO(eth_etherbone_record_description(32),
             payload_depth = buffer_depth,
             param_depth   = 1,
@@ -266,6 +267,7 @@ class LiteEthEtherboneRecordSender(Module):
 
         # # #
 
+        assert buffer_depth <= 256
         self.submodules.fifo = fifo = PacketFIFO(eth_etherbone_mmap_description(32),
             payload_depth = buffer_depth,
             param_depth   = 1,
@@ -323,7 +325,7 @@ class LiteEthEtherboneRecord(Module):
             sink.connect(depacketizer.sink),
             depacketizer.source.connect(receiver.sink)
         ]
-        if endianness is "big":
+        if endianness == "big":
             self.comb += receiver.sink.data.eq(reverse_bytes(depacketizer.source.data))
 
         # Save last ip address
@@ -347,7 +349,7 @@ class LiteEthEtherboneRecord(Module):
                 (sender.source.rcount != 0)*4 + sender.source.rcount*4),
             source.ip_address.eq(last_ip_address)
         ]
-        if endianness is "big":
+        if endianness == "big":
             self.comb += packetizer.sink.data.eq(reverse_bytes(sender.source.data))
 
 # Etherbone Wishbone Master ------------------------------------------------------------------------

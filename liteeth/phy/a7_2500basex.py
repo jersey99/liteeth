@@ -3,6 +3,7 @@
 #
 # Copyright (c) 2018 Sebastien Bourdeauducq <sb@m-labs.hk>
 # Copyright (c) 2020 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2023 Sergey Razumov <cyntem@gmail.com>
 # SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
@@ -17,12 +18,12 @@ from liteeth.common import *
 from liteeth.phy.a7_gtp import *
 from liteeth.phy.pcs_1000basex import *
 
-# A7_1000BASEX PHY ---------------------------------------------------------------------------------
+# A7_2500BASEX PHY ---------------------------------------------------------------------------------
 
-class A7_1000BASEX(LiteXModule):
+class A7_2500BASEX(LiteXModule):
     dw          = 8
-    tx_clk_freq = 125e6
-    rx_clk_freq = 125e6
+    tx_clk_freq = 312.5e6
+    rx_clk_freq = 312.5e6
     def __init__(self, qpll_channel, data_pads, sys_clk_freq, with_csr=True, rx_polarity=0, tx_polarity=0):
         pcs = PCS(lsb_first=True)
         self.submodules += pcs
@@ -200,7 +201,7 @@ class A7_1000BASEX(LiteXModule):
             p_RX_DEFER_RESET_BUF_EN      = "TRUE",
 
             # CDR Attributes
-            p_RXCDR_CFG                  = 0x0001107FE086021101010,
+            p_RXCDR_CFG                  = 0x0000107FE206001041010,
             p_RXCDR_FR_RESET_ON_EIDLE    = 0b0,
             p_RXCDR_HOLD_DURING_EIDLE    = 0b0,
             p_RXCDR_PH_RESET_ON_EIDLE    = 0b0,
@@ -318,10 +319,10 @@ class A7_1000BASEX(LiteXModule):
             p_SATA_PLL_CFG               = "VCO_3000MHZ",
 
             # RX Fabric Clock Output Control Attributes
-            p_RXOUT_DIV                  = 4,
+            p_RXOUT_DIV                  = 2,
 
             # TX Fabric Clock Output Control Attributes
-            p_TXOUT_DIV                  = 4,
+            p_TXOUT_DIV                  = 2,
 
             # RX Phase Interpolator Attributes
             p_RXPI_CFG0                  = 0b000,
@@ -700,17 +701,17 @@ class A7_1000BASEX(LiteXModule):
 
         # TX MMCM.
         self.tx_mmcm = tx_mmcm = S7MMCM()
-        tx_mmcm.register_clkin(txoutclk_rebuffer,   62.5e6)
-        tx_mmcm.create_clkout(self.cd_eth_tx_half,  62.5e6, buf="bufh", with_reset=False)
-        tx_mmcm.create_clkout(self.cd_eth_tx,      125.0e6, buf="bufh", with_reset=True)
+        tx_mmcm.register_clkin(txoutclk_rebuffer,   156.25e6)
+        tx_mmcm.create_clkout(self.cd_eth_tx_half,  156.25e6, buf="bufh", with_reset=False)
+        tx_mmcm.create_clkout(self.cd_eth_tx,      312.5e6, buf="bufh", with_reset=True)
         self.comb += tx_mmcm.reset.eq(tx_mmcm_reset)
         self.comb += tx_mmcm_locked.eq(tx_mmcm.locked)
 
         # RX MMCM.
         self.rx_mmcm = rx_mmcm = S7MMCM()
-        rx_mmcm.register_clkin(rxoutclk_rebuffer,   62.5e6)
-        rx_mmcm.create_clkout(self.cd_eth_rx_half,  62.5e6, buf="bufg", with_reset=False)
-        rx_mmcm.create_clkout(self.cd_eth_rx,      125.0e6, buf="bufg", with_reset=True)
+        rx_mmcm.register_clkin(rxoutclk_rebuffer,   156.25e6)
+        rx_mmcm.create_clkout(self.cd_eth_rx_half,  156.25e6, buf="bufg", with_reset=False)
+        rx_mmcm.create_clkout(self.cd_eth_rx,      312.5e6, buf="bufg", with_reset=True)
         self.comb += rx_mmcm.reset.eq(rx_mmcm_reset)
         self.comb += rx_mmcm_locked.eq(rx_mmcm.locked)
 
@@ -747,7 +748,7 @@ class A7_1000BASEX(LiteXModule):
         ]
 
         # Assume CDR lock time is 50,000 UI as per DS183 and similar to what the Xilinx wizards does.
-        cdr_lock_time = round(sys_clk_freq*50e3/1.25e9)
+        cdr_lock_time = round(sys_clk_freq*50e3/(312.5e6))
         cdr_lock_counter = Signal(max=cdr_lock_time+1)
         cdr_locked = Signal()
         self.sync += [

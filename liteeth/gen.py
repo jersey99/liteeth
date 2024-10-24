@@ -3,10 +3,11 @@
 #
 # This file is part of LiteEth.
 #
-# Copyright (c) 2015-2022 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2015-2023 Florent Kermarrec <florent@enjoy-digital.fr>
 # Copyright (c) 2020 Xiretza <xiretza@xiretza.xyz>
 # Copyright (c) 2020 Stefan Schrijvers <ximin@ximinity.net>
 # Copyright (c) 2022 Victor Suarez Rovere <suarezvictor@gmail.com>
+# Copyright (c) 2023 LumiGuide Fietsdetectie B.V. <goemansrowan@gmail.com>
 # SPDX-License-Identifier: BSD-2-Clause
 
 """
@@ -22,7 +23,6 @@ for some use cases it could be interesting to generate a standalone verilog file
 The standalone core is generated from a YAML configuration file that allows the user to generate
 easily a custom configuration of the core.
 
-TODO: identify limitations
 """
 
 import argparse
@@ -30,6 +30,8 @@ import os
 import yaml
 
 from migen import *
+
+from litex.gen import *
 
 from litex.build.generic_platform import *
 from litex.build.xilinx.platform import XilinxPlatform
@@ -46,6 +48,10 @@ from liteeth.common import *
 from liteeth import phy as liteeth_phys
 from liteeth.mac import LiteEthMAC
 from liteeth.core import LiteEthUDPIPCore
+from liteeth.core.dhcp import LiteEthDHCP
+
+from liteeth.frontend.stream import LiteEthUDPStreamer
+from liteeth.frontend.etherbone import LiteEthEtherbone
 
 # IOs ----------------------------------------------------------------------------------------------
 
@@ -61,12 +67,20 @@ _io = [
     # Interrupt
     ("interrupt", 0, Pins(1)),
 
+    # DHCP.
+    ("dhcp", 0,
+        Subsignal("start",      Pins(1)),
+        Subsignal("done",       Pins(1)),
+        Subsignal("timeout",    Pins(1)),
+        Subsignal("ip_address", Pins(32)),
+    ),
+
     # MII PHY Pads
-    ("mii_eth_clocks", 0,
+    ("mii_clocks", 0,
         Subsignal("tx", Pins(1)),
         Subsignal("rx", Pins(1)),
     ),
-    ("mii_eth", 0,
+    ("mii", 0,
         Subsignal("rst_n",   Pins(1)),
         Subsignal("mdio",    Pins(1)),
         Subsignal("mdc",     Pins(1)),
@@ -80,10 +94,10 @@ _io = [
     ),
 
     # RMII PHY Pads
-    ("rmii_eth_clocks", 0,
+    ("rmii_clocks", 0,
         Subsignal("ref_clk", Pins(1))
     ),
-    ("rmii_eth", 0,
+    ("rmii", 0,
         Subsignal("rst_n",   Pins(1)),
         Subsignal("rx_data", Pins(2)),
         Subsignal("crs_dv",  Pins(1)),
@@ -94,12 +108,12 @@ _io = [
     ),
 
     # GMII PHY Pads
-    ("gmii_eth_clocks", 0,
+    ("gmii_clocks", 0,
         Subsignal("tx",  Pins(1)),
         Subsignal("gtx", Pins(1)),
         Subsignal("rx",  Pins(1))
     ),
-    ("gmii_eth", 0,
+    ("gmii", 0,
         Subsignal("rst_n",   Pins(1)),
         Subsignal("int_n",   Pins(1)),
         Subsignal("mdio",    Pins(1)),
@@ -115,11 +129,11 @@ _io = [
     ),
 
     # RGMII PHY Pads
-    ("rgmii_eth_clocks", 0,
+    ("rgmii_clocks", 0,
         Subsignal("tx", Pins(1)),
         Subsignal("rx", Pins(1))
     ),
-    ("rgmii_eth", 0,
+    ("rgmii", 0,
         Subsignal("rst_n",   Pins(1)),
         Subsignal("int_n",   Pins(1)),
         Subsignal("mdio",    Pins(1)),
@@ -128,6 +142,17 @@ _io = [
         Subsignal("rx_data", Pins(4)),
         Subsignal("tx_ctl",  Pins(1)),
         Subsignal("tx_data", Pins(4))
+    ),
+
+    # SGMII PHY Pads
+    ("sgmii", 0,
+        Subsignal("refclk",  Pins(1)),
+        Subsignal("rst",     Pins(1)),
+        Subsignal("txp",     Pins(1)),
+        Subsignal("txn",     Pins(1)),
+        Subsignal("rxp",     Pins(1)),
+        Subsignal("rxn",     Pins(1)),
+        Subsignal("link_up", Pins(1)),
     ),
 ]
 
@@ -154,6 +179,36 @@ def get_udp_port_ios(name, data_width, dynamic_params=False):
             Subsignal("source_error", Pins(1)),
         ),
     ]
+
+def get_udp_raw_port_ios(name, data_width):
+    return [
+        (f"{name}", 0,
+
+            # Sink.
+            Subsignal("sink_ip_address", Pins(32)),
+            Subsignal("sink_src_port",   Pins(16)),
+            Subsignal("sink_dst_port",   Pins(16)),
+            Subsignal("sink_valid",      Pins(1)),
+            Subsignal("sink_length",     Pins(16)),
+            Subsignal("sink_last",       Pins(1)),
+            Subsignal("sink_ready",      Pins(1)),
+            Subsignal("sink_data",       Pins(data_width)),
+            Subsignal("sink_last_be",    Pins(data_width//8)),
+
+            # Source.
+            Subsignal("source_ip_address", Pins(32)),
+            Subsignal("source_src_port",   Pins(16)),
+            Subsignal("source_dst_port",   Pins(16)),
+            Subsignal("source_valid",      Pins(1)),
+            Subsignal("source_length",     Pins(16)),
+            Subsignal("source_last",       Pins(1)),
+            Subsignal("source_ready",      Pins(1)),
+            Subsignal("source_data",       Pins(data_width)),
+            Subsignal("source_last_be",    Pins(data_width//8)),
+            Subsignal("source_error",      Pins(1)),
+        ),
+    ]
+
 
 # PHY Core -----------------------------------------------------------------------------------------
 
@@ -183,38 +238,68 @@ class PHYCore(SoCMini):
         SoCMini.__init__(self, platform, clk_freq=core_config["clk_freq"], **soc_args)
 
         # CRG --------------------------------------------------------------------------------------
-        self.submodules.crg = CRG(platform.request("sys_clock"), platform.request("sys_reset"))
+        self.crg = CRG(platform.request("sys_clock"), platform.request("sys_reset"))
 
         # PHY --------------------------------------------------------------------------------------
         phy = core_config["phy"]
+        # MII.
         if phy in [liteeth_phys.LiteEthPHYMII]:
             ethphy = phy(
-                clock_pads = platform.request("mii_eth_clocks"),
-                pads       = platform.request("mii_eth"))
+                clock_pads = platform.request("mii_clocks"),
+                pads       = platform.request("mii"))
+        # RMII.
         elif phy in [liteeth_phys.LiteEthPHYRMII]:
             ethphy = phy(
                 refclk_cd  = None,
-                clock_pads = platform.request("rmii_eth_clocks"),
-                pads       = platform.request("rmii_eth"))
+                clock_pads = platform.request("rmii_clocks"),
+                pads       = platform.request("rmii"))
+        # GMII.
         elif phy in [liteeth_phys.LiteEthPHYGMII]:
             ethphy = phy(
-                clock_pads = platform.request("gmii_eth_clocks"),
-                pads       = platform.request("gmii_eth"))
+                clock_pads = platform.request("gmii_clocks"),
+                pads       = platform.request("gmii"))
+        # GMII / MII.
         elif phy in [liteeth_phys.LiteEthPHYGMIIMII]:
             ethphy = phy(
-                clock_pads = platform.request("gmii_eth_clocks"),
-                pads       = platform.request("gmii_eth"),
+                clock_pads = platform.request("gmii_clocks"),
+                pads       = platform.request("gmii"),
                 clk_freq   = self.clk_freq)
-        elif phy in [liteeth_phys.LiteEthS7PHYRGMII, liteeth_phys.LiteEthECP5PHYRGMII]:
+        # RGMII.
+        elif phy in [
+            liteeth_phys.LiteEthS7PHYRGMII,
+            liteeth_phys.LiteEthECP5PHYRGMII,
+        ]:
             ethphy = phy(
-                clock_pads         = platform.request("rgmii_eth_clocks"),
-                pads               = platform.request("rgmii_eth"),
+                clock_pads         = platform.request("rgmii_clocks"),
+                pads               = platform.request("rgmii"),
                 tx_delay           = core_config.get("phy_tx_delay", 2e-9),
                 rx_delay           = core_config.get("phy_rx_delay", 2e-9),
                 with_hw_init_reset = False) # FIXME: required since sys_clk = eth_rx_clk.
+        # SGMII.
+        elif phy in [
+            liteeth_phys.A7_1000BASEX,
+            liteeth_phys.K7_1000BASEX,
+            liteeth_phys.KU_1000BASEX,
+            liteeth_phys.USP_GTH_1000BASEX,
+            liteeth_phys.USP_GTY_1000BASEX,
+        ]:
+            ethphy_pads = platform.request("sgmii")
+            ethphy = phy(
+                refclk_or_clk_pads = ethphy_pads.refclk,
+                data_pads          = ethphy_pads,
+                sys_clk_freq       = self.clk_freq,
+                refclk_freq        = core_config.get("refclk_freq", 200e6),
+                with_csr           = False,
+                rx_polarity        = 0, # Add support to liteeth_gen if useful.
+                tx_polarity        = 0, # Add support to liteeth_gen if useful.
+            )
+            self.comb += [
+                ethphy.reset.eq(ethphy_pads.rst),
+                ethphy_pads.link_up.eq(ethphy.link_up),
+            ]
         else:
             raise ValueError("Unsupported PHY")
-        self.submodules.ethphy = ethphy
+        self.ethphy = ethphy
 
         # Timing constaints.
         # Generate timing constraints to ensure the "keep" attribute is properly set on the various
@@ -233,23 +318,32 @@ class PHYCore(SoCMini):
 class MACCore(PHYCore):
     def __init__(self, platform, core_config):
         # Parameters -------------------------------------------------------------------------------
-        nrxslots     = core_config.get("nrxslots", 2)
-        ntxslots     = core_config.get("ntxslots", 2)
-        bus_standard = core_config["core"]
+        nrxslots        = core_config.get("nrxslots", 2)
+        ntxslots        = core_config.get("ntxslots", 2)
+        bus_standard    = core_config["core"]
+        tx_cdc_depth    = core_config.get("tx_cdc_depth", 32)
+        tx_cdc_buffered = core_config.get("tx_cdc_buffered", False)
+        rx_cdc_depth    = core_config.get("rx_cdc_depth", 32)
+        rx_cdc_buffered = core_config.get("rx_cdc_buffered", False)
         assert bus_standard in ["wishbone", "axi-lite"]
 
         # PHY --------------------------------------------------------------------------------------
         PHYCore.__init__(self, platform, core_config)
 
         # MAC --------------------------------------------------------------------------------------
-        self.submodules.ethmac = ethmac = LiteEthMAC(
-            phy            = self.ethphy,
-            dw             = 32,
-            interface      = "wishbone",
-            endianness     = core_config["endianness"],
-            nrxslots       = nrxslots,
-            ntxslots       = ntxslots,
-            full_memory_we = core_config.get("full_memory_we", False))
+        self.ethmac = ethmac = LiteEthMAC(
+            phy             = self.ethphy,
+            dw              = 32,
+            interface       = "wishbone",
+            endianness      = core_config["endianness"],
+            nrxslots        = nrxslots,
+            ntxslots        = ntxslots,
+            full_memory_we  = core_config.get("full_memory_we", False),
+            tx_cdc_depth    = tx_cdc_depth,
+            tx_cdc_buffered = tx_cdc_buffered,
+            rx_cdc_depth    = rx_cdc_depth,
+            rx_cdc_buffered = rx_cdc_buffered,
+        )
 
         if bus_standard == "wishbone":
           # Wishbone Interface -----------------------------------------------------------------------
@@ -276,10 +370,112 @@ class MACCore(PHYCore):
 # UDP Core -----------------------------------------------------------------------------------------
 
 class UDPCore(PHYCore):
-    def __init__(self, platform, core_config):
-        from liteeth.frontend.stream import LiteEthUDPStreamer
+    def add_streamer_port(self, platform, name, port_cfg):
+        # Use default Data-Width of 8-bit when not specified.
+        data_width = port_cfg.get("data_width", 8)
 
+        # Used dynamic UDP-Port/IP-Address when not specified.
+        dynamic_params = port_cfg.get("ip_address", None) is None
+
+        # FIFO Depth.
+        tx_fifo_depth = port_cfg.get("tx_fifo_depth", 64)
+        rx_fifo_depth = port_cfg.get("rx_fifo_depth", 64)
+
+        # Create/Add IOs.
+        # ---------------
+        platform.add_extension(get_udp_port_ios(name,
+            data_width     = data_width,
+            dynamic_params = dynamic_params
+        ))
+
+        port_ios = platform.request(name)
+
+        if dynamic_params:
+            ip_address = port_ios.ip_address
+            udp_port   = port_ios.udp_port
+        else:
+            ip_address = port_cfg.get("ip_address")
+            udp_port   = port_cfg.get("udp_port")
+
+        # Create UDPStreamer.
+        # -------------------
+        udp_streamer = LiteEthUDPStreamer(self.core.udp,
+            ip_address    = ip_address,
+            udp_port      = udp_port,
+            data_width    = data_width,
+            tx_fifo_depth = tx_fifo_depth,
+            rx_fifo_depth = rx_fifo_depth
+        )
+        self.submodules += udp_streamer
+
+        # Connect IOs.
+        # ------------
+        # Connect UDP Sink IOs to UDP Steamer.
+        self.comb += [
+            udp_streamer.sink.valid.eq(port_ios.sink_valid),
+            udp_streamer.sink.last.eq(port_ios.sink_last),
+            port_ios.sink_ready.eq(udp_streamer.sink.ready),
+            udp_streamer.sink.data.eq(port_ios.sink_data)
+        ]
+
+        # Connect UDP Streamer to UDP Source IOs.
+        self.comb += [
+            port_ios.source_valid.eq(udp_streamer.source.valid),
+            port_ios.source_last.eq(udp_streamer.source.last),
+            udp_streamer.source.ready.eq(port_ios.source_ready),
+            port_ios.source_data.eq(udp_streamer.source.data),
+            port_ios.source_error.eq(udp_streamer.source.error),
+        ]
+
+    def add_raw_port(self, platform, name, port_cfg):
+        # Use default Data-Width of 8-bit when not specified.
+        data_width = port_cfg.get("data_width", 8)
+
+        # Create/Add IOs.
+         # ---------------
+        platform.add_extension(get_udp_raw_port_ios(name,
+            data_width     = data_width,
+         ))
+
+        port_ios = platform.request(name)
+
+        raw_port = self.core.udp.crossbar.get_port(port_ios.sink_dst_port, dw=data_width)
+
+        # Connect IOs.
+        # ------------
+        # Connect UDP Sink IOs to UDP.
+        self.comb += [
+            raw_port.sink.valid.eq(port_ios.sink_valid),
+            raw_port.sink.last.eq(port_ios.sink_last),
+            raw_port.sink.dst_port.eq(port_ios.sink_dst_port),
+            raw_port.sink.src_port.eq(port_ios.sink_src_port),
+            raw_port.sink.ip_address.eq(port_ios.sink_ip_address),
+            raw_port.sink.length.eq(port_ios.sink_length),
+            port_ios.sink_ready.eq(raw_port.sink.ready),
+            raw_port.sink.data.eq(port_ios.sink_data),
+            raw_port.sink.last_be.eq(port_ios.sink_last_be),
+        ]
+
+        # Connect UDP to UDP Source IOs.
+        self.comb += [
+            port_ios.source_valid.eq(raw_port.source.valid),
+            port_ios.source_last.eq(raw_port.source.last),
+            port_ios.source_dst_port.eq(raw_port.source.dst_port),
+            port_ios.source_src_port.eq(raw_port.source.src_port),
+            port_ios.source_ip_address.eq(raw_port.source.ip_address),
+            port_ios.source_length.eq(raw_port.source.length),
+            raw_port.source.ready.eq(port_ios.source_ready),
+            port_ios.source_data.eq(raw_port.source.data),
+            port_ios.source_last_be.eq(raw_port.source.last_be),
+            port_ios.source_error.eq(raw_port.source.error),
+        ]
+
+    def __init__(self, platform, core_config):
         # Config -----------------------------------------------------------------------------------
+        tx_cdc_depth    = core_config.get("tx_cdc_depth", 32)
+        tx_cdc_buffered = core_config.get("tx_cdc_buffered", False)
+        rx_cdc_depth    = core_config.get("rx_cdc_depth", 32)
+        rx_cdc_buffered = core_config.get("rx_cdc_buffered", False)
 
         # MAC Address.
         mac_address = core_config.get("mac_address", None)
@@ -288,82 +484,78 @@ class UDPCore(PHYCore):
             mac_address = platform.request("mac_address")
 
         # IP Address.
+        dhcp       = core_config.get("dhcp", False)
         ip_address = core_config.get("ip_address", None)
         # Get IP Address from IOs when not specified.
         if ip_address is None:
             ip_address = platform.request("ip_address")
+        else:
+            assert not dhcp
 
         # PHY --------------------------------------------------------------------------------------
         PHYCore.__init__(self, platform, core_config)
 
         # Core -------------------------------------------------------------------------------------
         data_width = core_config.get("data_width", 8)
-        self.submodules.core = LiteEthUDPIPCore(self.ethphy,
-            mac_address = mac_address,
-            ip_address  = ip_address,
-            clk_freq    = core_config["clk_freq"],
-            dw          = data_width,
+        self.core = LiteEthUDPIPCore(self.ethphy,
+            mac_address       = mac_address,
+            ip_address        = ip_address,
+            clk_freq          = core_config["clk_freq"],
+            dw                = data_width,
             with_sys_datapath = (data_width == 32),
+            tx_cdc_depth      = tx_cdc_depth,
+            tx_cdc_buffered   = tx_cdc_buffered,
+            rx_cdc_depth      = rx_cdc_depth,
+            rx_cdc_buffered   = rx_cdc_buffered,
         )
 
-        # UDP Ports --------------------------------------------------------------------------------
-        for name, port in core_config["udp_ports"].items():
-            # Parameters.
-            # -----------
+        # DHCP -------------------------------------------------------------------------------------
 
-            # Use default Data-Width of 8-bit when not specified.
-            data_width = port.get("data_width", 8)
-
-            # Used dynamic UDP-Port/IP-Address when not specified.
-            dynamic_params = port.get("ip_address", None) is None
-
-            # FIFO Depth.
-            tx_fifo_depth = port.get("tx_fifo_depth", 64)
-            rx_fifo_depth = port.get("rx_fifo_depth", 64)
-
-            # Create/Add IOs.
-            # ---------------
-            platform.add_extension(get_udp_port_ios(name,
-                data_width     = data_width,
-                dynamic_params = dynamic_params
-            ))
-            port_ios = platform.request(name)
-
-            # Create UDPStreamer.
-            # -------------------
-            if dynamic_params:
-                ip_address = port_ios.ip_address
-                udp_port   = port_ios.udp_port
+        if dhcp:
+            dhcp_pads = platform.request("dhcp")
+            dhcp_port = self.core.udp.crossbar.get_port(68, dw=32, cd="sys")
+            if isinstance(mac_address, Signal):
+                dhcp_mac_address = mac_address
             else:
-                ip_address = port.get("ip_address")
-                udp_port   = port.get("udp_port")
-            udp_streamer = LiteEthUDPStreamer(self.core.udp,
-                ip_address    = ip_address,
-                udp_port      = udp_port,
-                data_width    = data_width,
-                tx_fifo_depth = tx_fifo_depth,
-                rx_fifo_depth = rx_fifo_depth
+                dhcp_mac_address = Signal(48, reset=0x10e2d5000001)
+            self.dhcp = LiteEthDHCP(udp_port=dhcp_port, sys_clk_freq=self.sys_clk_freq)
+            self.comb += [
+                self.dhcp.start.eq(dhcp_pads.start),
+                dhcp_pads.done.eq(self.dhcp.done),
+                dhcp_pads.timeout.eq(self.dhcp.timeout),
+                dhcp_pads.ip_address.eq(self.dhcp.ip_address),
+            ]
+
+        # Etherbone --------------------------------------------------------------------------------
+
+        etherbone              = core_config.get("etherbone", False)
+        etherbone_port         = core_config.get("etherbone_port", 1234)
+        etherbone_buffer_depth = core_config.get("etherbone_buffer_depth", 16)
+
+        if etherbone:
+            assert (data_width == 32)
+            self.etherbone = LiteEthEtherbone(
+                udp          =  self.core.udp,
+                udp_port     = etherbone_port,
+                buffer_depth = etherbone_buffer_depth,
+                cd           = "sys"
             )
-            self.submodules += udp_streamer
+            axil_bus = axi.AXILiteInterface(address_width=32, data_width=32)
+            platform.add_extension(axil_bus.get_ios("mmap"))
+            self.submodules += axi.Wishbone2AXILite(self.etherbone.wishbone.bus, axil_bus)
+            self.comb += axil_bus.connect_to_pads(platform.request("mmap"), mode="master")
 
-            # Connect IOs.
-            # ------------
-             # Connect UDP Sink IOs to UDP Steamer.
-            self.comb += [
-                udp_streamer.sink.valid.eq(port_ios.sink_valid),
-                udp_streamer.sink.last.eq(port_ios.sink_last),
-                port_ios.sink_ready.eq(udp_streamer.sink.ready),
-                udp_streamer.sink.data.eq(port_ios.sink_data)
-            ]
+        # UDP Ports --------------------------------------------------------------------------------
+        for name, port_cfg in core_config["udp_ports"].items():
+            # mode either `raw` or `stream`, default to streamer to be backwards compatible
+            mode = port_cfg.get("mode", "streamer")
+            assert mode == "raw" or mode == "streamer"
 
-            # Connect UDP Streamer to UDP Source IOs.
-            self.comb += [
-                port_ios.source_valid.eq(udp_streamer.source.valid),
-                port_ios.source_last.eq(udp_streamer.source.last),
-                udp_streamer.source.ready.eq(port_ios.source_ready),
-                port_ios.source_data.eq(udp_streamer.source.data),
-                port_ios.source_error.eq(udp_streamer.source.error),
-            ]
+            if mode == "streamer":
+                self.add_streamer_port(platform, name, port_cfg)
+            elif mode == "raw":
+                self.add_raw_port(platform, name, port_cfg)
+
 
 # Build --------------------------------------------------------------------------------------------
 
@@ -383,7 +575,7 @@ def main():
                 core_config[k] = replaces[r]
         if k == "phy":
             core_config[k] = getattr(liteeth_phys, core_config[k])
-        if k in ["clk_freq"]:
+        if k in ["refclk_freq", "clk_freq"]:
             core_config[k] = int(float(core_config[k]))
         if k in ["phy_tx_delay", "phy_rx_delay"]:
             core_config[k] = float(core_config[k])

@@ -145,6 +145,12 @@ _io = [
     ),
 
     # SGMII PHY Pads
+    ("sgmii_qpll", 0,
+        Subsignal("clk",     Pins(1)),
+        Subsignal("refclk",  Pins(1)),
+        Subsignal("reset",   Pins(1)),
+        Subsignal("lock",    Pins(1)),
+    ),
     ("sgmii", 0,
         Subsignal("refclk",  Pins(1)),
         Subsignal("rst",     Pins(1)),
@@ -278,21 +284,72 @@ class PHYCore(SoCMini):
         # SGMII.
         elif phy in [
             liteeth_phys.A7_1000BASEX,
+            liteeth_phys.A7_2500BASEX,
             liteeth_phys.K7_1000BASEX,
+            liteeth_phys.K7_2500BASEX,
             liteeth_phys.KU_1000BASEX,
+            liteeth_phys.KU_2500BASEX,
             liteeth_phys.USP_GTH_1000BASEX,
+            liteeth_phys.USP_GTH_2500BASEX,
             liteeth_phys.USP_GTY_1000BASEX,
+            liteeth_phys.USP_GTY_2500BASEX,
         ]:
             ethphy_pads = platform.request("sgmii")
-            ethphy = phy(
-                refclk_or_clk_pads = ethphy_pads.refclk,
-                data_pads          = ethphy_pads,
-                sys_clk_freq       = self.clk_freq,
-                refclk_freq        = core_config.get("refclk_freq", 200e6),
-                with_csr           = False,
-                rx_polarity        = 0, # Add support to liteeth_gen if useful.
-                tx_polarity        = 0, # Add support to liteeth_gen if useful.
-            )
+            # Artix7.
+            if phy in [liteeth_phys.A7_1000BASEX, liteeth_phys.A7_2500BASEX]:
+                refclk_freq = core_config.get("refclk_freq", 0)
+                assert refclk_freq in [125e6, 156.25e6]
+                # QPLL.
+                qpll_channel_index = core_config.get("qpll_channel", 0)
+                assert qpll_channel_index in [0, 1]
+                if core_config.get("qpll", True):
+                    from liteeth.phy.a7_gtp import QPLLSettings, QPLL
+                    qpll_settings = QPLLSettings(
+                        refclksel  = 0b001,
+                        fbdiv      = {
+                            liteeth_phys.A7_1000BASEX : 4,
+                            liteeth_phys.A7_2500BASEX : 5,
+                        }[phy],
+                        fbdiv_45   = {
+                            125e6    : 5,
+                            156.25e6 : 4,
+                        }[refclk_freq],
+                        refclk_div = 1
+                    )
+                    qpll = QPLL(ethphy_pads.refclk, qpll_settings)
+                    self.submodules += qpll
+                    qpll_channel = qpll.channels[qpll_channel_index]
+                else:
+                    qpll_channel = platform.request("sgmii_qpll")
+                    qpll_channel.index = qpll_channel_index
+                # PHY.
+                ethphy = phy(
+                    # General.
+                    data_pads      = ethphy_pads,
+                    sys_clk_freq   = self.clk_freq,
+                    with_csr       = False,
+                    # QPLL.
+                    qpll_channel   = qpll_channel,
+                    # TX.
+                    tx_cm_type     = core_config.get("phy_tx_cm_type",     "MMCM"),
+                    tx_cm_buf_type = core_config.get("phy_tx_cm_buf_type", "BUFH"),
+                    tx_polarity    = core_config.get("phy_tx_polarity",         0),
+                    # RX.
+                    rx_cm_type     = core_config.get("phy_rx_cm_type",     "MMCM"),
+                    rx_cm_buf_type = core_config.get("phy_rx_cm_buf_type", "BUFG"),
+                    rx_polarity    = core_config.get("phy_rx_polarity",         0),
+                )
+            # Other 7-Series/Ultrascale(+).
+            else:
+                ethphy = phy(
+                    refclk_or_clk_pads = ethphy_pads.refclk,
+                    data_pads          = ethphy_pads,
+                    sys_clk_freq       = self.clk_freq,
+                    refclk_freq        = core_config.get("refclk_freq", 200e6),
+                    with_csr           = False,
+                    rx_polarity        = core_config.get("phy_rx_polarity", 0),
+                    tx_polarity        = core_config.get("phy_tx_polarity", 0),
+                )
             self.comb += [
                 ethphy.reset.eq(ethphy_pads.rst),
                 ethphy_pads.link_up.eq(ethphy.link_up),
@@ -502,7 +559,7 @@ class UDPCore(PHYCore):
             ip_address        = ip_address,
             clk_freq          = core_config["clk_freq"],
             dw                = data_width,
-            with_sys_datapath = (data_width == 32),
+            with_sys_datapath = data_width in [16, 32],
             tx_cdc_depth      = tx_cdc_depth,
             tx_cdc_buffered   = tx_cdc_buffered,
             rx_cdc_depth      = rx_cdc_depth,
@@ -533,7 +590,6 @@ class UDPCore(PHYCore):
         etherbone_buffer_depth = core_config.get("etherbone_buffer_depth", 16)
 
         if etherbone:
-            assert (data_width == 32)
             self.etherbone = LiteEthEtherbone(
                 udp          =  self.core.udp,
                 udp_port     = etherbone_port,
@@ -546,7 +602,7 @@ class UDPCore(PHYCore):
             self.comb += axil_bus.connect_to_pads(platform.request("mmap"), mode="master")
 
         # UDP Ports --------------------------------------------------------------------------------
-        for name, port_cfg in core_config["udp_ports"].items():
+        for name, port_cfg in core_config.get("udp_ports", {}).items():
             # mode either `raw` or `stream`, default to streamer to be backwards compatible
             mode = port_cfg.get("mode", "streamer")
             assert mode == "raw" or mode == "streamer"
@@ -564,6 +620,7 @@ def main():
     builder_args(parser)
     parser.set_defaults(output_dir="build")
     parser.add_argument("config", help="YAML config file")
+    parser.add_argument("--name", default="liteeth_core", help="Standalone core/module name")
     args = parser.parse_args()
     core_config = yaml.load(open(args.config).read(), Loader=yaml.Loader)
 
@@ -606,7 +663,7 @@ def main():
         builder_arguments["csr_csv"] = os.path.join(builder_arguments["output_dir"], "csr.csv")
 
     builder = Builder(soc, **builder_arguments)
-    builder.build(build_name="liteeth_core")
+    builder.build(build_name=args.name)
 
 if __name__ == "__main__":
     main()

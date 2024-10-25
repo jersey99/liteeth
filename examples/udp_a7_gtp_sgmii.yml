@@ -1,13 +1,15 @@
 #
 # This file is part of LiteEth.
 #
-# Copyright (c) 2020-2023 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2020-2024 Florent Kermarrec <florent@enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
 # PHY --------------------------------------------------------------------------
-phy       : USP_GTH_1000BASEX
-vendor    : xilinx
-toolchain : vivado
+phy             : A7_1000BASEX
+phy_tx_polarity : 0
+phy_rx_polarity : 0
+vendor          : xilinx
+toolchain       : vivado
 
 # Core -------------------------------------------------------------------------
 refclk_freq : 156.25e6

@@ -42,7 +42,11 @@ class LiteEthPHYRGMIITX(LiteXModule):
                 p_DYN_DLY_EN   = "FALSE",
                 p_ADAPT_EN     = "FALSE",
                 p_C_STATIC_DLY = 0,
+                i_SDTAP        = 0,
+                i_DLYSTEP      = Constant(0, 8),
+                i_VALUE        = 0,
                 i_DI           = tx_ctl_oddrx1f,
+                o_DF           = Open(),
                 o_DO           = pads.tx_ctl,
             )
         ]
@@ -58,8 +62,12 @@ class LiteEthPHYRGMIITX(LiteXModule):
                     p_DYN_DLY_EN   = "FALSE",
                     p_ADAPT_EN     = "FALSE",
                     p_C_STATIC_DLY = 0,
-                    i_DI        = tx_data_oddrx1f[i],
-                    o_DO        = pads.tx_data[i],
+                    i_SDTAP        = 0,
+                    i_DLYSTEP      = Constant(0, 8),
+                    i_VALUE        = 0,
+                    i_DI           = tx_data_oddrx1f[i],
+                    o_DF           = Open(),
+                    o_DO           = pads.tx_data[i],
                 )
             ]
         self.comb += sink.ready.eq(1)
@@ -85,7 +93,11 @@ class LiteEthPHYRGMIIRX(LiteXModule):
                 p_DYN_DLY_EN   = "FALSE",
                 p_ADAPT_EN     = "FALSE",
                 p_C_STATIC_DLY = rx_delay_taps,
+                i_SDTAP        = 0,
+                i_DLYSTEP      = Constant(0, 8),
+                i_VALUE        = 0,
                 i_DI           = pads.rx_ctl,
+                o_DF           = Open(),
                 o_DO           = rx_ctl_delayf,
             ),
             DDRInput(
@@ -101,7 +113,11 @@ class LiteEthPHYRGMIIRX(LiteXModule):
                     p_DYN_DLY_EN   = "FALSE",
                     p_ADAPT_EN     = "FALSE",
                     p_C_STATIC_DLY = rx_delay_taps,
+                    i_SDTAP        = 0,
+                    i_DLYSTEP      = Constant(0, 8),
+                    i_VALUE        = 0,
                     i_DI           = pads.rx_data[i],
+                    o_DF           = Open(),
                     o_DO           = rx_data_delayf[i]),
                 DDRInput(
                     clk = ClockSignal("eth_rx"),
@@ -132,14 +148,14 @@ class LiteEthPHYRGMIICRG(LiteXModule):
 
         # RX Clock
         self.cd_eth_rx = ClockDomain()
-        self.comb += self.cd_eth_rx.clk.eq(clock_pads.rx)
+        self.cd_eth_rx.clk = clock_pads.rx
 
         # TX Clock
         self.cd_eth_tx = ClockDomain()
         if isinstance(tx_clk, Signal):
             self.comb += self.cd_eth_tx.clk.eq(tx_clk)
         else:
-            self.comb += self.cd_eth_tx.clk.eq(self.cd_eth_rx.clk)
+            self.cd_eth_tx.clk = self.cd_eth_rx.clk
 
         tx_delay_taps = int(tx_delay/12.5e-12) # 12.5ps per tap
         assert tx_delay_taps < 256
@@ -160,6 +176,8 @@ class LiteEthPHYRGMIICRG(LiteXModule):
                 i_DI           = eth_tx_clk_o,
                 i_DLYSTEP      = self._txdelay_taps.storage,
                 i_SDTAP        = 1,
+                i_VALUE        = 0, # FIXME
+                o_DF           = Open(),
                 o_DO           = clock_pads.tx,
             )
         ]

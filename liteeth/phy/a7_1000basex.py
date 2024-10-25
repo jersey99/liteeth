@@ -2,7 +2,8 @@
 # This file is part of MiSoC and has been adapted/modified for LiteEth.
 #
 # Copyright (c) 2018 Sebastien Bourdeauducq <sb@m-labs.hk>
-# Copyright (c) 2020 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2020-2024 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2023 Sergey Razumov <cyntem@gmail.com>
 # SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
@@ -11,7 +12,7 @@ from migen.genlib.cdc import PulseSynchronizer
 
 from litex.gen import *
 
-from litex.soc.cores.clock import S7MMCM
+from litex.soc.cores.clock import S7PLL, S7MMCM
 
 from liteeth.common import *
 from liteeth.phy.a7_gtp import *
@@ -21,11 +22,21 @@ from liteeth.phy.pcs_1000basex import *
 
 class A7_1000BASEX(LiteXModule):
     dw          = 8
-    tx_clk_freq = 125e6
+    linerate    = 1.25e9
     rx_clk_freq = 125e6
-    def __init__(self, qpll_channel, data_pads, sys_clk_freq, with_csr=True, rx_polarity=0, tx_polarity=0):
-        pcs = PCS(lsb_first=True)
-        self.submodules += pcs
+    tx_clk_freq = 125e6
+    def __init__(self, qpll_channel, data_pads, sys_clk_freq, with_csr=True,
+        # TX Parameters.
+        tx_cm_type     = "PLL",
+        tx_cm_buf_type = "BUFH",
+        tx_polarity    = 0,
+
+        # RX Parameters.
+        rx_cm_type     = "PLL",
+        rx_cm_buf_type = "BUFG",
+        rx_polarity    = 0,
+    ):
+        self.pcs = pcs = PCS(lsb_first=True)
 
         self.sink    = pcs.sink
         self.source  = pcs.source
@@ -46,16 +57,16 @@ class A7_1000BASEX(LiteXModule):
 
         # # #
 
-        # GTP transceiver
-        tx_reset       = Signal()
-        tx_mmcm_locked = Signal()
-        tx_mmcm_reset  = Signal(reset=1)
-        tx_data        = Signal(20)
-        tx_reset_done  = Signal()
+        # GTP transceiver.
+        tx_reset      = Signal()
+        tx_cm_locked  = Signal()
+        tx_cm_reset   = Signal(reset=1)
+        tx_data       = Signal(20)
+        tx_reset_done = Signal()
 
         rx_reset          = Signal()
-        rx_mmcm_locked    = Signal()
-        rx_mmcm_reset     = Signal(reset=1)
+        rx_cm_locked      = Signal()
+        rx_cm_reset       = Signal(reset=1)
         rx_data           = Signal(20)
         rx_reset_done     = Signal()
         rx_pma_reset_done = Signal()
@@ -200,7 +211,10 @@ class A7_1000BASEX(LiteXModule):
             p_RX_DEFER_RESET_BUF_EN      = "TRUE",
 
             # CDR Attributes
-            p_RXCDR_CFG                  = 0x0001107FE086021101010,
+            p_RXCDR_CFG                  = {
+                1.25e9  : 0x0001107FE086021101010,
+                3.125e9 : 0x0000107FE206001041010,
+            }[self.linerate],
             p_RXCDR_FR_RESET_ON_EIDLE    = 0b0,
             p_RXCDR_HOLD_DURING_EIDLE    = 0b0,
             p_RXCDR_PH_RESET_ON_EIDLE    = 0b0,
@@ -318,10 +332,10 @@ class A7_1000BASEX(LiteXModule):
             p_SATA_PLL_CFG               = "VCO_3000MHZ",
 
             # RX Fabric Clock Output Control Attributes
-            p_RXOUT_DIV                  = 4,
+            p_RXOUT_DIV                  = {1.25e9 : 4, 3.125e9 : 2}[self.linerate],
 
             # TX Fabric Clock Output Control Attributes
-            p_TXOUT_DIV                  = 4,
+            p_TXOUT_DIV                  = {1.25e9 : 4, 3.125e9 : 2}[self.linerate],
 
             # RX Phase Interpolator Attributes
             p_RXPI_CFG0                  = 0b000,
@@ -411,7 +425,7 @@ class A7_1000BASEX(LiteXModule):
             i_SETERRSTATUS         = 0,
             # RX Initialization and Reset Ports
             i_EYESCANRESET         = 0,
-            i_RXUSERRDY            = rx_mmcm_locked,
+            i_RXUSERRDY            = rx_cm_locked,
             # RX Margin Analysis Ports
             o_EYESCANDATAERROR     = Open(),
             i_EYESCANMODE          = 0,
@@ -567,7 +581,7 @@ class A7_1000BASEX(LiteXModule):
             i_CFGRESET             = 0,
             i_GTTXRESET            = tx_reset,
             o_PCSRSVDOUT           = Open(),
-            i_TXUSERRDY            = tx_mmcm_locked,
+            i_TXUSERRDY            = tx_cm_locked,
             # TX Phase Interpolator PPM Controller Ports
             i_TXPIPPMEN            = 0,
             i_TXPIPPMOVRDEN        = 0,
@@ -688,7 +702,7 @@ class A7_1000BASEX(LiteXModule):
 
         # Get 125MHz clocks back - the GTP is outputting 62.5MHz.
         txoutclk_rebuffer = Signal()
-        self.specials += Instance("BUFH",
+        self.specials += Instance("BUFG",
             i_I = self.txoutclk,
             o_O = txoutclk_rebuffer
         )
@@ -698,35 +712,33 @@ class A7_1000BASEX(LiteXModule):
             o_O = rxoutclk_rebuffer
         )
 
-        # TX MMCM.
-        self.tx_mmcm = tx_mmcm = S7MMCM()
-        tx_mmcm.register_clkin(txoutclk_rebuffer,   62.5e6)
-        tx_mmcm.create_clkout(self.cd_eth_tx_half,  62.5e6, buf="bufh", with_reset=False)
-        tx_mmcm.create_clkout(self.cd_eth_tx,      125.0e6, buf="bufh", with_reset=True)
-        self.comb += tx_mmcm.reset.eq(tx_mmcm_reset)
-        self.comb += tx_mmcm_locked.eq(tx_mmcm.locked)
+        # TX CM.
+        self.tx_cm = tx_cm = {"PLL": S7PLL, "MMCM": S7MMCM}[tx_cm_type]()
+        tx_cm.register_clkin(txoutclk_rebuffer,  self.tx_clk_freq/2)
+        tx_cm.create_clkout(self.cd_eth_tx_half, self.tx_clk_freq/2, buf=tx_cm_buf_type, with_reset=False)
+        tx_cm.create_clkout(self.cd_eth_tx,      self.tx_clk_freq,   buf=tx_cm_buf_type, with_reset=True)
+        self.comb += tx_cm.reset.eq(tx_cm_reset)
+        self.comb += tx_cm_locked.eq(tx_cm.locked)
 
-        # RX MMCM.
-        self.rx_mmcm = rx_mmcm = S7MMCM()
-        rx_mmcm.register_clkin(rxoutclk_rebuffer,   62.5e6)
-        rx_mmcm.create_clkout(self.cd_eth_rx_half,  62.5e6, buf="bufg", with_reset=False)
-        rx_mmcm.create_clkout(self.cd_eth_rx,      125.0e6, buf="bufg", with_reset=True)
-        self.comb += rx_mmcm.reset.eq(rx_mmcm_reset)
-        self.comb += rx_mmcm_locked.eq(rx_mmcm.locked)
+        # RX CM.
+        self.rx_cm = rx_cm = {"PLL": S7PLL, "MMCM": S7MMCM}[rx_cm_type]()
+        rx_cm.register_clkin(rxoutclk_rebuffer,  self.rx_clk_freq/2)
+        rx_cm.create_clkout(self.cd_eth_rx_half, self.rx_clk_freq/2, buf=rx_cm_buf_type, with_reset=False)
+        rx_cm.create_clkout(self.cd_eth_rx,      self.rx_clk_freq,   buf=rx_cm_buf_type, with_reset=True)
+        self.comb += rx_cm.reset.eq(rx_cm_reset)
+        self.comb += rx_cm_locked.eq(rx_cm.locked)
 
         # Transceiver init
-        tx_init = GTPTxInit(sys_clk_freq)
-        self.submodules += tx_init
+        self.tx_init = tx_init = GTPTxInit(sys_clk_freq)
         self.comb += [
             qpll_channel.reset.eq(tx_init.qpll_reset),
             tx_init.qpll_lock.eq(qpll_channel.lock),
             tx_reset.eq(tx_init.tx_reset | self.reset)
         ]
-        self.sync += tx_mmcm_reset.eq(~qpll_channel.lock)
-        tx_mmcm_reset.attr.add("no_retiming")
+        self.sync += tx_cm_reset.eq(~qpll_channel.lock)
+        tx_cm_reset.attr.add("no_retiming")
 
-        rx_init = GTPRxInit(sys_clk_freq)
-        self.submodules += rx_init
+        self.rx_init = rx_init = GTPRxInit(sys_clk_freq)
         self.comb += [
             rx_init.enable.eq(tx_init.done),
             rx_reset.eq(rx_init.rx_reset | self.reset),
@@ -747,7 +759,7 @@ class A7_1000BASEX(LiteXModule):
         ]
 
         # Assume CDR lock time is 50,000 UI as per DS183 and similar to what the Xilinx wizards does.
-        cdr_lock_time = round(sys_clk_freq*50e3/1.25e9)
+        cdr_lock_time = round(sys_clk_freq*50e3/self.linerate)
         cdr_lock_counter = Signal(max=cdr_lock_time+1)
         cdr_locked = Signal()
         self.sync += [
@@ -759,9 +771,9 @@ class A7_1000BASEX(LiteXModule):
             ).Else(
                 cdr_locked.eq(1)
             ),
-            rx_mmcm_reset.eq(~cdr_locked)
+            rx_cm_reset.eq(~cdr_locked)
         ]
-        rx_mmcm_reset.attr.add("no_retiming")
+        rx_cm_reset.attr.add("no_retiming")
 
         # Gearbox and PCS connection
         self.gearbox = gearbox = PCSGearbox()
@@ -776,3 +788,10 @@ class A7_1000BASEX(LiteXModule):
     def add_csr(self):
         self._reset = CSRStorage()
         self.comb += self.reset.eq(self._reset.storage)
+
+# A7_2500BASEX PHY ---------------------------------------------------------------------------------
+
+class A7_2500BASEX(A7_1000BASEX):
+    linerate    = 3.125e9
+    rx_clk_freq = 312.5e6
+    tx_clk_freq = 312.5e6

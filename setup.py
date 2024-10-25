@@ -10,7 +10,7 @@ with open("README.md", "r", encoding="utf-8") as fp:
 
 setup(
     name                          = "liteeth",
-    version                       = "2023.12",
+    version                       = "2024.04",
     description                   = "Small footprint and configurable Ethernet core",
     long_description              = long_description,
     long_description_content_type = "text/markdown",
@@ -27,12 +27,12 @@ setup(
     include_package_data          = True,
     keywords                      = "HDL ASIC FPGA hardware design",
     classifiers                   = [
-        "Topic                :: Scientific/Engineering :: Electronic Design Automation (EDA)",
-        "Environment          :: Console",
-        "Development Status   :: 3 - Alpha",
-        "Intended Audience    :: Developers",
-        "License              :: OSI Approved :: BSD License",
-        "Operating System     :: OS Independent",
+        "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+        "Environment :: Console",
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: Developers",
+        "License :: OSI Approved :: BSD License",
+        "Operating System :: OS Independent",
         "Programming Language :: Python",
     ],
     entry_points = {

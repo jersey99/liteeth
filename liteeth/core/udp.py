@@ -52,7 +52,7 @@ class LiteEthUDPCrossbar(LiteEthCrossbar):
         self.tx_cdc = tx_cdc = stream.ClockDomainCrossing(
             layout  = eth_udp_user_description(user_port.dw),
             cd_from = cd,
-            cd_to   ="sys"
+            cd_to   = "sys"
         )
         self.comb += user_port.sink.connect(tx_cdc.sink)
 

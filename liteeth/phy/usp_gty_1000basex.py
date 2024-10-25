@@ -1,7 +1,7 @@
 #
 # This file is part of LiteEth.
 #
-# Copyright (c) 2019-2023 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2019-2024 Florent Kermarrec <florent@enjoy-digital.fr>
 # Copyright (c) 2018 Sebastien Bourdeauducq <sb@m-labs.hk>
 # SPDX-License-Identifier: BSD-2-Clause
 
@@ -11,6 +11,8 @@ from migen.genlib.cdc import PulseSynchronizer
 
 from litex.gen import *
 
+from liteiclink.serdes.gty_ultrascale import GTYChannelPLL
+
 from liteeth.common import *
 from liteeth.phy.pcs_1000basex import *
 
@@ -19,12 +21,12 @@ from liteeth.phy.pcs_1000basex import *
 class USP_GTY_1000BASEX(LiteXModule):
     # Configured for 200MHz or 156.25MHz transceiver reference clock
     dw          = 8
-    tx_clk_freq = 125e6
+    linerate    = 1.25e9
     rx_clk_freq = 125e6
+    tx_clk_freq = 125e6
     def __init__(self, refclk_or_clk_pads, data_pads, sys_clk_freq, refclk_freq=200e6, with_csr=True, rx_polarity=0, tx_polarity=0):
         assert refclk_freq in [200e6, 156.25e6]
-        pcs = PCS(lsb_first=True)
-        self.submodules += pcs
+        self.pcs = pcs = PCS(lsb_first=True)
 
         self.sink    = pcs.sink
         self.source  = pcs.source
@@ -67,6 +69,10 @@ class USP_GTY_1000BASEX(LiteXModule):
         rx_reset      = Signal()
         rx_data       = Signal(20)
         rx_reset_done = Signal()
+
+        pll = GTYChannelPLL(refclk, refclk_freq, self.linerate)
+        self.submodules.pll = pll
+        print(pll)
 
         gty_params = dict(
             p_ACJTAG_DEBUG_MODE            = 0b0,
@@ -136,11 +142,11 @@ class USP_GTY_1000BASEX(LiteXModule):
             p_CPLL_CFG1                    = 0b0000000000101011,
             p_CPLL_CFG2                    = 0b0000000000000010,
             p_CPLL_CFG3                    = 0b0000000000000000,
-            p_CPLL_FBDIV                   = {200e6: 5, 156.25e6: 4}[refclk_freq],
-            p_CPLL_FBDIV_45                = {200e6: 5, 156.25e6: 4}[refclk_freq],
+            p_CPLL_FBDIV                   = pll.config["n2"],
+            p_CPLL_FBDIV_45                = pll.config["n1"],
             p_CPLL_INIT_CFG0               = 0b0000001010110010,
             p_CPLL_LOCK_CFG                = 0b0000000111101000,
-            p_CPLL_REFCLK_DIV              = {200e6: 2, 156.25e6: 1}[refclk_freq],
+            p_CPLL_REFCLK_DIV              = pll.config["m"],
             p_CTLE3_OCAP_EXT_CTRL          = 0b000,
             p_CTLE3_OCAP_EXT_EN            = 0b0,
             p_DDI_CTRL                     = 0b00,
@@ -354,7 +360,7 @@ class USP_GTY_1000BASEX(LiteXModule):
             p_RXOOB_CFG                    = 0b000000110,
             p_RXOOB_CLK_CFG                = "PMA",
             p_RXOSCALRESET_TIME            = 0b00011,
-            p_RXOUT_DIV                    = 4,
+            p_RXOUT_DIV                    = pll.config["d"],
             p_RXPCSRESET_TIME              = 0b00011,
             p_RXPHBEACON_CFG               = 0b0000000000000000,
             p_RXPHDLY_CFG                  = 0b0010000001110000,
@@ -412,7 +418,7 @@ class USP_GTY_1000BASEX(LiteXModule):
             p_RX_INT_DATAWIDTH             = 0,
             p_RX_PMA_POWER_SAVE            = 0b0,
             p_RX_PMA_RSV0                  = 0b0000000000101111,
-            p_RX_PROGDIV_CFG               = 20.0,
+            p_RX_PROGDIV_CFG               = {1.25e9 : 20.0, 3.125e9 : 10.0}[self.linerate],
             p_RX_PROGDIV_RATE              = 0b0000000000000001,
             p_RX_RESLOAD_CTRL              = 0b0000,
             p_RX_RESLOAD_OVRD              = 0b0,
@@ -466,7 +472,7 @@ class USP_GTY_1000BASEX(LiteXModule):
             p_TXFIFO_ADDR_CFG              = "LOW",
             p_TXGBOX_FIFO_INIT_RD_ADDR     = 4,
             p_TXGEARBOX_EN                 = "FALSE",
-            p_TXOUT_DIV                    = 4,
+            p_TXOUT_DIV                    = pll.config["d"],
             p_TXPCSRESET_TIME              = 0b00011,
             p_TXPHDLY_CFG0                 = 0b0110000001110000,
             p_TXPHDLY_CFG1                 = 0b0000000000001111,
@@ -524,7 +530,7 @@ class USP_GTY_1000BASEX(LiteXModule):
             p_TX_PMA_RSV0                  = 0b0000000000000000,
             p_TX_PMA_RSV1                  = 0b0000000000000000,
             p_TX_PROGCLK_SEL               = "CPLL",
-            p_TX_PROGDIV_CFG               = 20.0,
+            p_TX_PROGDIV_CFG               = {1.25e9 : 20.0, 3.125e9 : 10.0}[self.linerate],
             p_TX_PROGDIV_RATE              = 0b0000000000000001,
             p_TX_RXDETECT_CFG              = 0b00000000110010,
             p_TX_RXDETECT_REF              = 5,
@@ -960,6 +966,14 @@ class USP_GTY_1000BASEX(LiteXModule):
             pcs.tbi_rx.eq(gearbox.rx_data)
         ]
 
+
     def add_csr(self):
         self._reset = CSRStorage()
         self.comb += self.reset.eq(self._reset.storage)
+
+# USP_GTY_2500BASEX PHY ----------------------------------------------------------------------------
+
+class USP_GTY_2500BASEX(USP_GTY_1000BASEX):
+    linerate    = 3.125e9
+    rx_clk_freq = 312.5e6
+    tx_clk_freq = 312.5e6

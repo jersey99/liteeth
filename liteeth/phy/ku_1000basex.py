@@ -2,7 +2,7 @@
 # This file is part of LiteEth.
 #
 # Copyright (c) 2018 Sebastien Bourdeauducq <sb@m-labs.hk>
-# Copyright (c) 2019-2020 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2019-2024 Florent Kermarrec <florent@enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
@@ -11,19 +11,22 @@ from migen.genlib.cdc import PulseSynchronizer
 
 from litex.gen import *
 
+from liteiclink.serdes.gth3_ultrascale import GTHChannelPLL
+
 from liteeth.common import *
 from liteeth.phy.pcs_1000basex import *
 
 # KU_1000BASEX PHY ---------------------------------------------------------------------------------
 
 class KU_1000BASEX(LiteXModule):
-	# Configured for 200MHz transceiver reference clock
+    # Configured for 200MHz or 156.25MHz transceiver reference clock
     dw          = 8
-    tx_clk_freq = 125e6
+    linerate    = 1.25e9
     rx_clk_freq = 125e6
-    def __init__(self, refclk_or_clk_pads, data_pads, sys_clk_freq, with_csr=True, rx_polarity=0, tx_polarity=0):
-        pcs = PCS(lsb_first=True)
-        self.submodules += pcs
+    tx_clk_freq = 125e6
+    def __init__(self, refclk_or_clk_pads, data_pads, sys_clk_freq, refclk_freq=200e6, with_csr=True, rx_polarity=0, tx_polarity=0):
+        assert refclk_freq in [200e6, 156.25e6]
+        self.pcs = pcs = PCS(lsb_first=True)
 
         self.sink    = pcs.sink
         self.source  = pcs.source
@@ -66,6 +69,10 @@ class KU_1000BASEX(LiteXModule):
         rx_reset      = Signal()
         rx_data       = Signal(20)
         rx_reset_done = Signal()
+
+        pll = GTHChannelPLL(refclk, refclk_freq, self.linerate)
+        self.submodules.pll = pll
+        print(pll)
 
         gth_params = dict(
             p_ACJTAG_DEBUG_MODE            = 0b0,
@@ -121,12 +128,12 @@ class KU_1000BASEX(LiteXModule):
             p_CPLL_CFG1                    = 0b1010010010101100,
             p_CPLL_CFG2                    = 0b0000000000000111,
             p_CPLL_CFG3                    = 0b000000,
-            p_CPLL_FBDIV                   = 5,
-            p_CPLL_FBDIV_45                = 5,
+            p_CPLL_FBDIV                   = pll.config["n2"],
+            p_CPLL_FBDIV_45                = pll.config["n1"],
             p_CPLL_INIT_CFG0               = 0b0000001010110010,
             p_CPLL_INIT_CFG1               = 0b00000000,
             p_CPLL_LOCK_CFG                = 0b0000000111101000,
-            p_CPLL_REFCLK_DIV              = 2,
+            p_CPLL_REFCLK_DIV              = pll.config["m"],
             p_DDI_CTRL                     = 0b00,
             p_DDI_REALIGN_WAIT             = 15,
             p_DEC_MCOMMA_DETECT            = "FALSE",
@@ -289,7 +296,7 @@ class KU_1000BASEX(LiteXModule):
             p_RXOOB_CFG                    = 0b000000110,
             p_RXOOB_CLK_CFG                = "PMA",
             p_RXOSCALRESET_TIME            = 0b00011,
-            p_RXOUT_DIV                    = 4,
+            p_RXOUT_DIV                    = pll.config["d"],
             p_RXPCSRESET_TIME              = 0b00011,
             p_RXPHBEACON_CFG               = 0b0000000000000000,
             p_RXPHDLY_CFG                  = 0b0010000000100000,
@@ -318,7 +325,7 @@ class KU_1000BASEX(LiteXModule):
             p_RX_BIAS_CFG0                 = 0b0000101010110100,
             p_RX_BUFFER_CFG                = 0b000000,
             p_RX_CAPFF_SARC_ENB            = 0b0,
-            p_RX_CLK25_DIV                 = 8,
+            p_RX_CLK25_DIV                 = {200e6: 8, 156.25e6: 7}[refclk_freq],
             p_RX_CLKMUX_EN                 = 0b1,
             p_RX_CLK_SLIP_OVRD             = 0b00000,
             p_RX_CM_BUF_CFG                = 0b1010,
@@ -349,7 +356,7 @@ class KU_1000BASEX(LiteXModule):
             p_RX_FABINT_USRCLK_FLOP        = 0b0,
             p_RX_INT_DATAWIDTH             = 0,
             p_RX_PMA_POWER_SAVE            = 0b0,
-            p_RX_PROGDIV_CFG               = 20.0,
+            p_RX_PROGDIV_CFG               = {1.25e9 : 20.0, 3.125e9 : 10.0}[self.linerate],
             p_RX_SAMPLE_PERIOD             = 0b111,
             p_RX_SIG_VALID_DLY             = 11,
             p_RX_SUM_DFETAPREP_EN          = 0b0,
@@ -394,7 +401,7 @@ class KU_1000BASEX(LiteXModule):
             p_TXFIFO_ADDR_CFG            = "LOW",
             p_TXGBOX_FIFO_INIT_RD_ADDR   = 4,
             p_TXGEARBOX_EN               = "FALSE",
-            p_TXOUT_DIV                  = 4,
+            p_TXOUT_DIV                    = pll.config["d"],
             p_TXPCSRESET_TIME            = 0b00011,
             p_TXPHDLY_CFG0               = 0b0010000000100000,
             p_TXPHDLY_CFG1               = 0b0000000001110101,
@@ -417,7 +424,7 @@ class KU_1000BASEX(LiteXModule):
             p_TXSYNC_MULTILANE           = 0b0,
             p_TXSYNC_OVRD                = 0b0,
             p_TXSYNC_SKIP_DA             = 0b0,
-            p_TX_CLK25_DIV               = 8,
+            p_TX_CLK25_DIV               = {200e6: 8, 156.25e6: 7}[refclk_freq],
             p_TX_CLKMUX_EN               = 0b1,
             p_TX_DATA_WIDTH              = 20,
             p_TX_DCD_CFG                 = 0b000010,
@@ -448,7 +455,7 @@ class KU_1000BASEX(LiteXModule):
             p_TX_PMADATA_OPT             = 0b0,
             p_TX_PMA_POWER_SAVE          = 0b0,
             p_TX_PROGCLK_SEL             = "CPLL",
-            p_TX_PROGDIV_CFG             = 20.0,
+            p_TX_PROGDIV_CFG             = {1.25e9 : 20.0, 3.125e9 : 10.0}[self.linerate],
             p_TX_QPI_STATUS_EN           = 0b0,
             p_TX_RXDETECT_CFG            = 0b00000000110010,
             p_TX_RXDETECT_REF            = 0b100,
@@ -854,3 +861,10 @@ class KU_1000BASEX(LiteXModule):
     def add_csr(self):
         self._reset = CSRStorage()
         self.comb += self.reset.eq(self._reset.storage)
+
+# KU_2500BASEX PHY ---------------------------------------------------------------------------------
+
+class KU_2500BASEX(KU_1000BASEX):
+    linerate    = 3.125e9
+    rx_clk_freq = 312.5e6
+    tx_clk_freq = 312.5e6

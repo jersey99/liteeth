@@ -10,82 +10,135 @@ from migen.genlib.resetsync import AsyncResetSynchronizer
 
 from litex.gen import *
 
-from litex.build.io import DDROutput
+from litex.build.io import SDRInput, SDROutput, DDROutput
 
 from liteeth.common import *
 from liteeth.phy.common import *
 
-# LiteEth PHY RMII TX ------------------------------------------------------------------------------
+# LiteEth PHY RMII Timer ---------------------------------------------------------------------------
 
-class LiteEthPHYRMIITX(LiteXModule):
-    def __init__(self, pads):
-        self.sink = sink = stream.Endpoint(eth_phy_description(8))
+class LiteEthPHYRMIITimer(LiteXModule):
+    def __init__(self, speed):
+        self.rst = Signal() # i.
+        self.ce  = Signal() # o.
 
         # # #
 
-        self.converter = converter = stream.Converter(8, 2)
-        self.comb += [
-            converter.sink.valid.eq(sink.valid),
-            converter.sink.data.eq(sink.data),
-            sink.ready.eq(converter.sink.ready),
-            converter.source.ready.eq(1),
-        ]
-        pads.tx_en.reset_less   = True
-        pads.tx_data.reset_less = True
+        timer = Signal(4)
+        self.comb += self.ce.eq(timer == 0)
         self.sync += [
-            pads.tx_en.eq(converter.source.valid),
-            pads.tx_data.eq(converter.source.data)
+            # Decrement timer.
+            timer.eq(timer - 1),
+            # Reload Timer.
+            If(self.ce | self.rst,
+                Case(speed, {
+                    0b0: timer.eq(9), #  10Mbps.
+                    0b1: timer.eq(0), # 100Mbps.
+                })
+            )
         ]
+
+# LiteEth PHY RMII TX ------------------------------------------------------------------------------
+
+class LiteEthPHYRMIITX(LiteXModule):
+    def __init__(self, pads, clk_signal):
+        self.sink  = sink = stream.Endpoint(eth_phy_description(8))
+        self.speed = Signal() # 0: 10Mbps / 1: 100Mbps.
+
+        # # #
+
+        # Speed Timer for 10Mbps/100Mbps.
+        # -------------------------------
+        self.timer = timer = LiteEthPHYRMIITimer(speed=self.speed)
+        self.comb += timer.rst.eq(~sink.valid)
+
+        # Converter: 8-bit to 2-bit.
+        # --------------------------
+        self.converter = converter = stream.Converter(8, 2)
+
+        # Datapath: Sink -> Converter.
+        # ----------------------------
+        self.comb += [
+            sink.connect(converter.sink, keep={"valid", "ready", "data"}),
+            converter.source.ready.eq(timer.ce),
+        ]
+
+        # Output (Sync).
+        # --------------
+        self.specials += SDROutput(i=converter.source.valid, o=pads.tx_en, clk=clk_signal)
+        for i in range(2):
+            self.specials += SDROutput(i=converter.source.data[i], o=pads.tx_data[i], clk=clk_signal)
+
 
 # LiteEth PHY RMII RX ------------------------------------------------------------------------------
 
 class LiteEthPHYRMIIRX(LiteXModule):
-    def __init__(self, pads):
+    def __init__(self, pads, clk_signal):
         self.source = source = stream.Endpoint(eth_phy_description(8))
+        self.speed = Signal() # 0: 10Mbps / 1: 100Mbps.
 
         # # #
 
-        converter = stream.Converter(2, 8)
-        converter = ResetInserter()(converter)
-        self.converter = converter
+        # Input (Sync).
+        # -------------
+        crs_dv_i  = Signal()
+        rx_data_i = Signal(2)
+        self.specials += SDRInput(i=pads.crs_dv, o=crs_dv_i, clk=clk_signal)
+        for i in range(2):
+            self.specials += SDRInput(i=pads.rx_data[i], o=rx_data_i[i], clk=clk_signal)
 
-        converter_sink_valid = Signal()
-        converter_sink_data  = Signal(2)
+        # Speed Timer for 10Mbps/100Mbps.
+        # -------------------------------
+        self.timer = timer = LiteEthPHYRMIITimer(speed=self.speed)
 
-        self.specials += [
-            MultiReg(converter_sink_valid, converter.sink.valid, n=2),
-            MultiReg(converter_sink_data,  converter.sink.data,  n=2)
-        ]
+        # Latch Input.
+        # ------------
+        crs_dv  = Signal()
+        rx_data = Signal(2)
+        self.sync += If(timer.ce,
+            crs_dv.eq(crs_dv_i),
+            rx_data.eq(rx_data_i),
+        )
 
-        crs_dv   = Signal()
-        crs_dv_d = Signal()
-        rx_data  = Signal(2)
+        # Converter: 2-bit to 8-bit.
+        # --------------------------
+        self.converter = converter = stream.Converter(2, 8)
+
+        # Delay.
+        # ------
+        # Add a delay to align the data with the frame boundaries since the end-of-frame condition
+        # (2 consecutive `crs_dv` signals low) is detected with a few cycles delay.
+        self.delay = delay = stream.Delay(layout=[("data", 2)], n=2)
+
+        # Frame Delimitation.
+        # -------------------
+        crs_first = Signal()
+        crs_last  = Signal()
+        crs_run   = Signal()
+        crs_dv_d  = Signal()
+        self.comb += If(timer.ce,
+            crs_first.eq(crs_dv & (rx_data != 0b00)), # Start of frame on crs_dv high and non-null data.
+            crs_last.eq(~crs_dv & ~crs_dv_d),         # End of frame on 2 consecutive crs_dv low.
+        )
         self.sync += [
-            crs_dv.eq(pads.crs_dv),
-            crs_dv_d.eq(crs_dv),
-            rx_data.eq(pads.rx_data)
+            If(timer.ce,  crs_dv_d.eq(crs_dv)),
+            If(crs_first, crs_run.eq(1)),
+            If(crs_last,  crs_run.eq(0)),
         ]
 
-        self.fsm = fsm = FSM(reset_state="IDLE")
-        fsm.act("IDLE",
-            If(crs_dv & (rx_data != 0b00),
-                converter_sink_valid.eq(1),
-                converter_sink_data.eq(rx_data),
-                NextState("RECEIVE")
-            ).Else(
-               converter.reset.eq(1)
-            )
-        )
-        fsm.act("RECEIVE",
-            converter_sink_valid.eq(1),
-            converter_sink_data.eq(rx_data),
-            # End of frame when 2 consecutives 0 on crs_dv.
-            If(~(crs_dv | crs_dv_d),
-              converter.sink.last.eq(1),
-              NextState("IDLE")
-            )
-        )
-        self.comb += converter.source.connect(source)
+        # Datapath: Input -> Delay -> Converter -> Source.
+        # ------------------------------------------------
+        self.comb += [
+            delay.sink.valid.eq(crs_first | (crs_run & timer.ce)),
+            delay.sink.data.eq(rx_data),
+            delay.source.ready.eq(~crs_run), # Flush pipeline when in idle.
+            delay.source.connect(converter.sink, keep={"data"}),
+            If(crs_run & timer.ce,
+                delay.source.connect(converter.sink, keep={"valid", "ready"}),
+                converter.sink.last.eq(crs_last),
+            ),
+            converter.source.connect(source),
+         ]
 
 # LiteEth PHY RMII CRG -----------------------------------------------------------------------------
 
@@ -97,8 +150,8 @@ class LiteEthPHYRMIICRG(LiteXModule):
 
         # # #
 
-        # RX/TX clocks
-
+        # RX/TX clocks.
+        # -------------
         self.cd_eth_rx = ClockDomain()
         self.cd_eth_tx = ClockDomain()
 
@@ -106,19 +159,22 @@ class LiteEthPHYRMIICRG(LiteXModule):
         if refclk_cd is None:
             self.cd_eth_rx.clk = clock_pads.ref_clk
             self.cd_eth_tx.clk = self.cd_eth_rx.clk
+            self.clk_signal    = self.cd_eth_rx.clk
 
         # Else use refclk_cd as RMII reference clock (provided by user design).
         else:
-            self.comb += self.cd_eth_rx.clk.eq(ClockSignal(refclk_cd))
-            self.comb += self.cd_eth_tx.clk.eq(ClockSignal(refclk_cd))
+            self.clk_signal = clk_signal = ClockSignal(refclk_cd)
+            self.comb += self.cd_eth_rx.clk.eq(clk_signal)
+            self.comb += self.cd_eth_tx.clk.eq(clk_signal)
             # Drive clock_pads if provided.
             if clock_pads is not None:
                 if with_refclk_ddr_output:
-                    self.specials += DDROutput(i1=0, i2=1, o=clock_pads.ref_clk, clk=ClockSignal("eth_tx"))
+                    self.specials += DDROutput(i1=0, i2=1, o=clock_pads.ref_clk, clk=clk_signal)
                 else:
-                    self.comb += clock_pads.ref_clk.eq(~ClockSignal("eth_tx")) # CHEKCME: Keep Invert?
+                    self.comb += clock_pads.ref_clk.eq(~clk_signal) # CHEKCME: Keep Invert?
 
-        # Reset
+        # Reset.
+        # ------
         self.reset = reset = Signal()
         if with_hw_init_reset:
             self.hw_reset = LiteEthPHYHWReset()
@@ -139,16 +195,38 @@ class LiteEthPHYRMII(LiteXModule):
     dw          = 8
     tx_clk_freq = 50e6
     rx_clk_freq = 50e6
-    def __init__(self, clock_pads, pads, refclk_cd="eth",
+    def __init__(self, clock_pads, pads, refclk_cd="eth", default_speed=1,
         with_hw_init_reset     = True,
         with_refclk_ddr_output = True):
+
+        # CRG.
+        # ----
         self.crg = LiteEthPHYRMIICRG(clock_pads, pads, refclk_cd,
             with_hw_init_reset     = with_hw_init_reset,
             with_refclk_ddr_output = with_refclk_ddr_output,
         )
-        self.tx = ClockDomainsRenamer("eth_tx")(LiteEthPHYRMIITX(pads))
-        self.rx = ClockDomainsRenamer("eth_rx")(LiteEthPHYRMIIRX(pads))
+
+        # Control/Status.
+        self._control = CSRStorage(fields=[
+            CSRField("speed", size=1, values=[
+                ("``0b0``", "10Mbps."),
+                ("``0b1``", "100Mbps."),
+            ], reset=default_speed)
+        ])
+        speed = Signal()
+        self.specials += MultiReg(self._control.fields.speed, speed, n=2)
+
+        # TX/RX.
+        # ------
+        self.tx = ClockDomainsRenamer("eth_tx")(LiteEthPHYRMIITX(pads, self.crg.clk_signal))
+        self.rx = ClockDomainsRenamer("eth_rx")(LiteEthPHYRMIIRX(pads, self.crg.clk_signal))
+        self.comb += [
+            self.tx.speed.eq(speed),
+            self.rx.speed.eq(speed),
+        ]
         self.sink, self.source = self.tx.sink, self.rx.source
 
+        # MDIO.
+        # -----
         if hasattr(pads, "mdc"):
             self.mdio = LiteEthPHYMDIO(pads)

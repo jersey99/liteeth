@@ -1,7 +1,7 @@
 #
 # This file is part of LiteEth.
 #
-# Copyright (c) 2015-2023 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2015-2024 Florent Kermarrec <florent@enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
 """
@@ -21,6 +21,8 @@ from liteeth.common import *
 
 from litex.soc.interconnect import wishbone
 from litex.soc.interconnect.packet import *
+
+from liteeth.mac.common import LiteEthLastHandler
 
 from liteeth.packet import Depacketizer, Packetizer
 
@@ -78,14 +80,22 @@ class LiteEthEtherbonePacketDepacketizer(Depacketizer):
 
 
 class LiteEthEtherbonePacketRX(LiteXModule):
-    def __init__(self):
+    def __init__(self, with_last_handler=False):
         self.sink   = sink   = stream.Endpoint(eth_udp_user_description(32))
         self.source = source = stream.Endpoint(eth_etherbone_packet_user_description(32))
 
         # # #
 
         self.depacketizer = depacketizer = LiteEthEtherbonePacketDepacketizer()
-        self.comb += sink.connect(depacketizer.sink)
+
+        if with_last_handler:
+            self.last_handler = LiteEthLastHandler(eth_udp_user_description(32))
+            self.comb += [
+                sink.connect(self.last_handler.sink),
+                self.last_handler.source.connect(depacketizer.sink),
+            ]
+        else:
+            self.comb += sink.connect(depacketizer.sink)
 
         self.fsm = fsm = FSM(reset_state="IDLE")
         fsm.act("IDLE",
@@ -124,7 +134,7 @@ class LiteEthEtherbonePacketRX(LiteXModule):
 class LiteEthEtherbonePacket(LiteXModule):
     def __init__(self, udp, udp_port, cd="sys"):
         self.tx = tx = LiteEthEtherbonePacketTX(udp_port)
-        self.rx = rx = LiteEthEtherbonePacketRX()
+        self.rx = rx = LiteEthEtherbonePacketRX(with_last_handler=(udp.crossbar.dw == 64)) # FIXME: Avoid 64-bit specific behavior.
         udp_port = udp.crossbar.get_port(udp_port, dw=32, cd=cd)
         self.comb += [
             tx.source.connect(udp_port.sink),
@@ -251,6 +261,7 @@ class LiteEthEtherboneRecordReceiver(LiteXModule):
             source.last.eq(count == fifo.source.rcount-1),
             source.last_be.eq(source.last << 3),
             source.count.eq(fifo.source.rcount),
+            source.be.eq(fifo.source.byte_enable),
             source.base_addr.eq(base_addr),
             source.addr.eq(fifo.source.data[2:]),
             fifo.source.ready.eq(source.ready),

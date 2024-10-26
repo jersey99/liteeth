@@ -11,8 +11,6 @@ from migen.genlib.cdc import PulseSynchronizer
 
 from litex.gen import *
 
-from liteiclink.serdes.gth3_ultrascale import GTHChannelPLL
-
 from liteeth.common import *
 from liteeth.phy.pcs_1000basex import *
 
@@ -25,6 +23,7 @@ class KU_1000BASEX(LiteXModule):
     rx_clk_freq = 125e6
     tx_clk_freq = 125e6
     def __init__(self, refclk_or_clk_pads, data_pads, sys_clk_freq, refclk_freq=200e6, with_csr=True, rx_polarity=0, tx_polarity=0):
+        from liteiclink.serdes.gth3_ultrascale import GTHChannelPLL
         assert refclk_freq in [200e6, 156.25e6]
         self.pcs = pcs = PCS(lsb_first=True)
 
@@ -356,7 +355,10 @@ class KU_1000BASEX(LiteXModule):
             p_RX_FABINT_USRCLK_FLOP        = 0b0,
             p_RX_INT_DATAWIDTH             = 0,
             p_RX_PMA_POWER_SAVE            = 0b0,
-            p_RX_PROGDIV_CFG               = {1.25e9 : 20.0, 3.125e9 : 10.0}[self.linerate],
+            p_RX_PROGDIV_CFG               = {
+                1.25e9  : 20.0*pll.config["d"]/4,
+                3.125e9 : 10.0*pll.config["d"]/4,
+            }[self.linerate],
             p_RX_SAMPLE_PERIOD             = 0b111,
             p_RX_SIG_VALID_DLY             = 11,
             p_RX_SUM_DFETAPREP_EN          = 0b0,
@@ -455,7 +457,10 @@ class KU_1000BASEX(LiteXModule):
             p_TX_PMADATA_OPT             = 0b0,
             p_TX_PMA_POWER_SAVE          = 0b0,
             p_TX_PROGCLK_SEL             = "CPLL",
-            p_TX_PROGDIV_CFG             = {1.25e9 : 20.0, 3.125e9 : 10.0}[self.linerate],
+            p_TX_PROGDIV_CFG               = {
+                1.25e9  : 20.0*pll.config["d"]/4,
+                3.125e9 : 10.0*pll.config["d"]/4,
+            }[self.linerate],
             p_TX_QPI_STATUS_EN           = 0b0,
             p_TX_RXDETECT_CFG            = 0b00000000110010,
             p_TX_RXDETECT_REF            = 0b100,

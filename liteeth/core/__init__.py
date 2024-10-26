@@ -5,6 +5,8 @@
 # Copyright (c) 2023 LumiGuide Fietsdetectie B.V. <goemansrowan@gmail.com>
 # SPDX-License-Identifier: BSD-2-Clause
 
+from litex.gen import *
+
 from liteeth.common    import *
 from liteeth.mac       import LiteEthMAC
 from liteeth.core.arp  import LiteEthARP
@@ -16,9 +18,9 @@ from liteeth.mac.common import LiteEthMACVLANCrossbar, LiteEthMACVLANPacketizer,
 
 # IP Core ------------------------------------------------------------------------------------------
 
-class LiteEthIPCore(Module, AutoCSR):
+class LiteEthIPCore(LiteXModule):
     def __init__(self, phy, mac_address, ip_address, clk_freq, arp_entries=1, dw=8,
-        with_icmp         = True,
+        with_icmp         = True, icmp_fifo_depth=128,
         with_ip_broadcast = True,
         with_sys_datapath = False,
         tx_cdc_depth      = 32,
@@ -34,7 +36,7 @@ class LiteEthIPCore(Module, AutoCSR):
 
         # MAC.
         # ----
-        self.submodules.mac = LiteEthMAC(
+        self.mac = LiteEthMAC(
             phy               = phy,
             dw                = dw,
             interface         = interface,
@@ -50,7 +52,7 @@ class LiteEthIPCore(Module, AutoCSR):
 
         # ARP.
         # ----
-        self.submodules.arp = LiteEthARP(
+        self.arp = LiteEthARP(
             mac         = self.mac,
             mac_address = mac_address,
             ip_address  = ip_address,
@@ -61,7 +63,7 @@ class LiteEthIPCore(Module, AutoCSR):
 
         # IP.
         # ---
-        self.submodules.ip  = LiteEthIP(
+        self.ip  = LiteEthIP(
             mac            = self.mac,
             mac_address    = mac_address,
             ip_address     = ip_address,
@@ -72,10 +74,11 @@ class LiteEthIPCore(Module, AutoCSR):
         # ICMP (Optional).
         # ----------------
         if with_icmp:
-            self.submodules.icmp = LiteEthICMP(
+            self.icmp = LiteEthICMP(
                 ip         = self.ip,
                 ip_address = ip_address,
                 dw         = dw,
+                fifo_depth = icmp_fifo_depth,
             )
 
 # VLAN CORE
@@ -137,7 +140,7 @@ class LiteEthVLANUDPIPCore(Module, AutoCSR):
 
 class LiteEthUDPIPCore(LiteEthIPCore):
     def __init__(self, phy, mac_address, ip_address, clk_freq, arp_entries=1, dw=8,
-        with_icmp         = True,
+        with_icmp         = True, icmp_fifo_depth=128,
         with_ip_broadcast = True,
         with_sys_datapath = False,
         tx_cdc_depth      = 32,
@@ -160,6 +163,7 @@ class LiteEthUDPIPCore(LiteEthIPCore):
             clk_freq          = clk_freq,
             arp_entries       = arp_entries,
             with_icmp         = with_icmp,
+            icmp_fifo_depth   = icmp_fifo_depth,
             dw                = dw,
             interface         = interface,
             endianness        = endianness,
@@ -172,7 +176,7 @@ class LiteEthUDPIPCore(LiteEthIPCore):
         )
         # UDP.
         # ----
-        self.submodules.udp = LiteEthUDP(
+        self.udp = LiteEthUDP(
             ip         = self.ip,
             ip_address = ip_address,
             dw         = dw,

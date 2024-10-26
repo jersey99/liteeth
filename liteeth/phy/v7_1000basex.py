@@ -1,31 +1,34 @@
 #
-# This file is part of MiSoC and has been adapted/modified for LiteEth.
+# This file is part of LiteEth.
 #
-# Copyright (c) 2018-2024 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2018 Sebastien Bourdeauducq <sb@m-labs.hk>
+# Copyright (c) 2019-2024 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2024 Gustavo Bastos <gustavocerq7gmail.com> 
 # SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
 from migen.genlib.resetsync import AsyncResetSynchronizer
 from migen.genlib.cdc import PulseSynchronizer
 
+from litex.soc.cores.clock import S7MMCM
+
 from litex.gen import *
 
-from litex.soc.cores.clock import S7MMCM
+from liteiclink.serdes.gth_7series import GTHChannelPLL, GTHTXInit, GTHRXInit
 
 from liteeth.common import *
 from liteeth.phy.pcs_1000basex import *
 
-# K7_1000BASEX PHY ---------------------------------------------------------------------------------
+# V7_1000BASEX PHY ---------------------------------------------------------------------------------
 
-class K7_1000BASEX(LiteXModule):
-    # Configured for 200MHz transceiver reference clock.
+class V7_1000BASEX(LiteXModule):
+    # Configured for 200MHz or 156.25MHz transceiver reference clock
     dw          = 8
     linerate    = 1.25e9
     rx_clk_freq = 125e6
     tx_clk_freq = 125e6
     def __init__(self, refclk_or_clk_pads, data_pads, sys_clk_freq, refclk_freq=200e6, with_csr=True, rx_polarity=0, tx_polarity=0):
-        from liteiclink.transceiver.gtx_7series import GTXChannelPLL, GTXTXInit, GTXRXInit
-        assert refclk_freq in [200e6]
+        assert refclk_freq in [200e6, 156.25e6]
         self.pcs = pcs = PCS(lsb_first=True)
 
         self.sink    = pcs.sink
@@ -37,7 +40,7 @@ class K7_1000BASEX(LiteXModule):
         self.cd_eth_tx_half = ClockDomain(reset_less=True)
         self.cd_eth_rx_half = ClockDomain(reset_less=True)
 
-        # for specifying clock constraints. 62.5MHz clocks.
+        # for specifying clock constraints. 125MHz clocks.
         self.txoutclk = Signal()
         self.rxoutclk = Signal()
 
@@ -55,33 +58,37 @@ class K7_1000BASEX(LiteXModule):
                 i_I   = refclk_or_clk_pads.p,
                 i_IB  = refclk_or_clk_pads.n,
                 i_CEB = 0,
-                o_O   = refclk
+                o_O   = refclk,
             )
 
-        # GTX transceiver
-        tx_reset       = Signal()
+        pll_locked    = Signal()
+
+        tx_reset      = Signal()
+        tx_data       = Signal(20)
+        tx_reset_done = Signal()
+
+        rx_reset      = Signal()
+        rx_data       = Signal(20)
+        rx_reset_done = Signal()
+        
+        # GTH transceiver
         tx_mmcm_locked = Signal()
         tx_mmcm_reset  = Signal(reset=1)
-        tx_data        = Signal(20)
-        tx_reset_done  = Signal()
-
-        rx_reset          = Signal()
+        
         rx_mmcm_locked    = Signal()
         rx_mmcm_reset     = Signal(reset=1)
-        rx_data           = Signal(20)
-        rx_reset_done     = Signal()
 
-        pll = GTXChannelPLL(refclk, 200e6, self.linerate)
+        pll = GTHChannelPLL(refclk, 200e6, self.linerate)
         self.submodules.pll = pll
+        print(pll)
 
-        # Work around Python's 255 argument limitation.
-        gtx_params = dict(
+        gth_params = dict(
             # Simulation-Only Attributes
             p_SIM_RECEIVER_DETECT_PASS     = "TRUE",
             p_SIM_TX_EIDLE_DRIVE_LEVEL     = "X",
             p_SIM_RESET_SPEEDUP            = "FALSE",
             p_SIM_CPLLREFCLK_SEL           = "FALSE",
-            p_SIM_VERSION                  = "4.0",
+            p_SIM_VERSION                  = "2.0",
 
             # RX Byte and Word Alignment Attributes
             p_ALIGN_COMMA_DOUBLE           = "FALSE",
@@ -336,14 +343,8 @@ class K7_1000BASEX(LiteXModule):
             # TX Configurable Driver Attributes
             p_TX_QPI_STATUS_EN             = 0b0,
 
-            # RX Equalizer Attributes
-            p_RX_DFE_KL_CFG2               = 0x301148AC,
-            p_RX_DFE_XYD_CFG               = 0b0000000000000,
-
-            # TX Configurable Driver Attributes
-            p_TX_PREDRIVER_MODE            = 0b0
         )
-        gtx_params.update(
+        gth_params.update(
             # CPLL Ports
             o_CPLLFBCLKLOST    = Open(),
             o_CPLLLOCK         = pll.lock,
@@ -357,12 +358,6 @@ class K7_1000BASEX(LiteXModule):
             i_PCSRSVDIN        = 0b0000000000000000,
             i_PCSRSVDIN2       = 0b00000,
             i_PMARSVDIN        = 0b00000,
-            i_PMARSVDIN2       = 0b00000,
-            i_TSTIN            = 0b11111111111111111111,
-            o_TSTOUT           = Open(),
-
-            # Channel
-            i_CLKRSVD          = 0b0000,
 
             # Channel - Clocking Ports
             i_GTGREFCLK        = 0,
@@ -385,7 +380,7 @@ class K7_1000BASEX(LiteXModule):
             # Clocking Ports
             o_GTREFCLKMONITOR  = Open(),
             i_QPLLCLK          = 0,
-            i_QPLLREFCLK       = 0,
+            i_QPLLREFCLK       = 1,
             i_RXSYSCLKSEL      = 0b00,
             i_TXSYSCLKSEL      = 0b00,
 
@@ -449,17 +444,17 @@ class K7_1000BASEX(LiteXModule):
 
             # Receive Ports - RX  Equalizer Ports
             i_RXDFEXYDEN       = 1,
-            i_RXDFEXYDHOLD     = 0,
-            i_RXDFEXYDOVRDEN   = 0,
+            #i_RXDFEXYDHOLD     = 0,
+            #i_RXDFEXYDOVRDEN   = 0,
 
             # Receive Ports - RX 8B/10B Decoder Ports
             i_RXDISPERR        = Cat(*[rx_data[10*i+9] for i in range(2)]),
             o_RXNOTINTABLE     = Open(),
 
             # Receive Ports - RX AFE
-            i_GTXRXP           = data_pads.rxp,
+            i_GTHRXP           = data_pads.rxp,
             # Receive Ports - RX AFE Ports
-            i_GTXRXN           = data_pads.rxn,
+            i_GTHRXN           = data_pads.rxn,
 
             # Receive Ports - RX Buffer Bypass Ports
             i_RXBUFRESET       = 0,
@@ -662,8 +657,8 @@ class K7_1000BASEX(LiteXModule):
             i_TXDATA           = Cat(*[tx_data[10*i:10*i+8] for i in range(2)]),
 
             # Transmit Ports - TX Driver and OOB signaling
-            o_GTXTXN           = data_pads.txn,
-            o_GTXTXP           = data_pads.txp,
+            o_GTHTXN           = data_pads.txn,
+            o_GTHTXP           = data_pads.txp,
 
             # Transmit Ports - TX Fabric Clock Output Control Ports
             o_TXOUTCLK         = self.txoutclk,
@@ -707,9 +702,10 @@ class K7_1000BASEX(LiteXModule):
             o_TXQPISENN        = Open(),
             o_TXQPISENP        = Open(),
         )
-        self.specials += Instance("GTXE2_CHANNEL", **gtx_params)
-
-        # Get 125MHz clocks back - the GTX is outputting 62.5MHz.
+ 
+        self.specials += Instance("GTHE2_CHANNEL", **gth_params)
+        
+        # Get 125MHz clocks back - the GTH is outputting 62.5MHz.
         txoutclk_rebuffer = Signal()
         self.specials += Instance("BUFH",
             i_I = self.txoutclk,
@@ -720,7 +716,7 @@ class K7_1000BASEX(LiteXModule):
             i_I = self.rxoutclk,
             o_O = rxoutclk_rebuffer
         )
-
+      
         # TX MMCM.
         self.tx_mmcm = tx_mmcm = S7MMCM()
         tx_mmcm.register_clkin(txoutclk_rebuffer,  self.tx_clk_freq/2)
@@ -738,7 +734,7 @@ class K7_1000BASEX(LiteXModule):
         self.comb += rx_mmcm_locked.eq(rx_mmcm.locked)
 
         # Transceiver init
-        self.tx_init = tx_init = ResetInserter()(GTXTXInit(sys_clk_freq, buffer_enable=True))
+        self.tx_init = tx_init = ResetInserter()(GTHTXInit(sys_clk_freq, buffer_enable=True))
         self.comb += [
             tx_init.reset.eq(self.reset),
             pll.reset.eq(tx_init.pllreset),
@@ -749,7 +745,7 @@ class K7_1000BASEX(LiteXModule):
         self.sync += tx_mmcm_reset.eq(~pll.lock)
         tx_mmcm_reset.attr.add("no_retiming")
 
-        self.rx_init = rx_init = ResetInserter()(GTXRXInit(sys_clk_freq, buffer_enable=True))
+        self.rx_init = rx_init = ResetInserter()(GTHRXInit(sys_clk_freq, buffer_enable=True))
         self.comb += [
             rx_init.reset.eq(~tx_init.done | self.reset),
             rx_init.plllock.eq(pll.lock),
@@ -794,9 +790,9 @@ class K7_1000BASEX(LiteXModule):
         self._reset = CSRStorage()
         self.comb += self.reset.eq(self._reset.storage)
 
-# K7_2500BASEX PHY ---------------------------------------------------------------------------------
+# V7_2500BASEX PHY ---------------------------------------------------------------------------------
 
-class K7_2500BASEX(K7_1000BASEX):
+class V7_2500BASEX(V7_1000BASEX):
     linerate    = 3.125e9
     rx_clk_freq = 312.5e6
     tx_clk_freq = 312.5e6

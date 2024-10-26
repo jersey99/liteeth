@@ -82,33 +82,33 @@ class LiteEthIPCore(LiteXModule):
             )
 
 # VLAN CORE
-class LiteEthVLANUDPIPCore(Module, AutoCSR):
+class LiteEthVLANUDPIPCore(LiteXModule):
     def __init__(self, phy, mac_address, ip_address, clk_freq, with_icmp=True, dw=8):
         self.mac_address = mac_address
         self.with_icmp = with_icmp
         self.clk_freq = clk_freq
         self.dw = dw
         ip_address = convert_ip(ip_address)
-        self.submodules.mac = LiteEthMAC(phy, dw, interface="crossbar", with_preamble_crc=True)
+        self.mac = LiteEthMAC(phy, dw, interface="crossbar", with_preamble_crc=True)
 
-        self.submodules.arp = LiteEthARP(self.mac, mac_address, ip_address, clk_freq, dw=dw)
-        self.submodules.ip  = LiteEthIP(self.mac, mac_address, ip_address, self.arp.table, with_broadcast=False, dw=dw)
+        self.arp = LiteEthARP(self.mac, mac_address, ip_address, clk_freq, dw=dw)
+        self.ip  = LiteEthIP(self.mac, mac_address, ip_address, self.arp.table, with_broadcast=False, dw=dw)
 
         if with_icmp:
-            self.submodules.icmp = LiteEthICMP(
+            self.icmp = LiteEthICMP(
                 ip         = self.ip,
                 ip_address = ip_address,
                 dw         = dw,
             )
 
-        self.submodules.udp = LiteEthUDP(self.ip, ip_address, dw=dw)
+        self.udp = LiteEthUDP(self.ip, ip_address, dw=dw)
 
         vlan_mac_port = self.mac.crossbar.get_port(ethernet_8021q_tpid, dw=dw)
 
-        self.submodules.crossbar     = LiteEthMACVLANCrossbar(dw)
-        self.submodules.packetizer   = stream.BufferizeEndpoints(
+        self.crossbar     = LiteEthMACVLANCrossbar(dw)
+        self.packetizer   = stream.BufferizeEndpoints(
             {"sink": stream.DIR_SINK})(LiteEthMACVLANPacketizer(dw))
-        self.submodules.depacketizer = stream.BufferizeEndpoints(
+        self.depacketizer = stream.BufferizeEndpoints(
             {"sink": stream.DIR_SINK, "source": stream.DIR_SOURCE})(LiteEthMACVLANDepacketizer(dw))
 
         self.comb += [

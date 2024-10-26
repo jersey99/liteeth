@@ -207,7 +207,7 @@ class LiteEthIPTX(LiteXModule):
 
         # # #
         # Fragmenter  .. TODO: Make it optional
-        self.submodules.ip_fragmenter = ip_fragmenter = stream.BufferizeEndpoints(
+        self.ip_fragmenter = ip_fragmenter = stream.BufferizeEndpoints(
             {"sink": stream.DIR_SINK})(LiteEthIPV4Fragmenter(dw))
 
         # Buffer.
@@ -382,8 +382,8 @@ class LiteEthIP(LiteXModule):
     def __init__(self, mac, mac_address, ip_address, arp_table, with_broadcast=True, vlan_id=False, dw=8):
         self.tx = tx = LiteEthIPTX(mac_address, ip_address, arp_table, dw=dw)
         self.rx = rx = LiteEthIPRX(mac_address, ip_address, with_broadcast, dw=dw)
-        if vlan_id:
-            assert(type(vlan_id) is int)
+        if vlan_id is not False:
+            assert(type(vlan_id) is Signal)
             mac_port = mac.crossbar.get_port((vlan_id << 16) | ethernet_type_ip, dw=dw)
             self.comb += [
                 mac_port.sink.vid.eq(vlan_id),

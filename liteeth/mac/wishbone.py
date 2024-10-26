@@ -31,7 +31,7 @@ class LiteEthMACWishboneInterface(LiteXModule):
 
         # Storage in SRAM.
         # ----------------
-        sram_depth = math.ceil(eth_mtu/(dw//8))
+        sram_depth = math.ceil(1500/(dw//8))
         self.sram = sram.LiteEthMACSRAM(dw, sram_depth, nrxslots, ntxslots, endianness, timestamp)
         self.comb += [
             self.sink.connect(self.sram.sink),

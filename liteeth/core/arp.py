@@ -36,7 +36,7 @@ class LiteEthARPTX(LiteXModule):
         self.source = source = stream.Endpoint(eth_mac_description(dw))
 
         # # #
-        if vlan_id:
+        if vlan_id is not False:
             packet_length = max(arp_header.length, arp_vlan_min_length)
         else:
             packet_length = max(arp_header.length, arp_min_length)
@@ -383,8 +383,8 @@ class LiteEthARP(LiteXModule):
             rx.source.connect(table.sink),
             table.source.connect(tx.sink)
         ]
-        if vlan_id:
-            assert(type(vlan_id) is int)
+        if vlan_id is not False:
+            assert(type(vlan_id) is Signal)
             mac_port = mac.crossbar.get_port((vlan_id << 16) | ethernet_type_arp, dw=dw)
             self.comb += [
                 mac_port.sink.vid.eq(vlan_id),

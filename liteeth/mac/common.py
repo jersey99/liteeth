@@ -91,13 +91,11 @@ class LiteEthMACVLANUserPort(LiteEthMACVLANSlavePort):
 
 class LiteEthMACVLANCrossbar(LiteEthCrossbar):
     def __init__(self, dw=8):
-        LiteEthCrossbar.__init__(self, LiteEthMACVLANMasterPort, ["ethernet_type", "vid"], dw)
+        LiteEthCrossbar.__init__(self, LiteEthMACVLANMasterPort, ["ethernet_type", "vid"], dw=dw, users_is_dict=False)
 
     def get_port(self, vid_ethernet_type, dw=8):
         port = LiteEthMACVLANUserPort(dw)
-        if vid_ethernet_type in self.users.keys():
-            raise ValueError("Ethernet type {0:#x} already assigned".format(vid_ethernet_type))
-        self.users[vid_ethernet_type] = port
+        self.users.append((vid_ethernet_type, port))
         return port
 
 # Last Handler -------------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-o#
+#
 # This file is part of LiteEth.
 #
 # Copyright (c) 2015-2024 Florent Kermarrec <florent@enjoy-digital.fr>

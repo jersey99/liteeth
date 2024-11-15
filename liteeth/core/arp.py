@@ -377,7 +377,7 @@ class LiteEthARP(LiteXModule):
     def __init__(self, mac, mac_address, ip_address, clk_freq, entries=1, vlan_id=False, dw=8):
         self.tx    = tx    = LiteEthARPTX(mac_address, ip_address, vlan_id=vlan_id, dw=dw)
         self.rx    = rx    = stream.BufferizeEndpoints(
-            {"sink": stream.DIR_SINK})(LiteEthARPRX(mac_address, ip_address, dw))
+            {"sink": stream.DIR_SINK}, pipe_ready=True)(LiteEthARPRX(mac_address, ip_address, dw))
         self.table = table = LiteEthARPTable(clk_freq, entries=entries)
         self.comb += [
             rx.source.connect(table.sink),

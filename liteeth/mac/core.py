@@ -65,7 +65,7 @@ class LiteEthMACCore(Module, AutoCSR):
             def add_cdc(self):
                 tx_cdc = stream.ClockDomainCrossing(eth_phy_description(core_dw),
                     cd_from  = "sys",
-                    cd_to    = "eth_tx",
+                    cd_to    = "eth_tx" if not dw == 64 else "sys",
                     depth    = tx_cdc_depth,
                     buffered = tx_cdc_buffered,
                 )
@@ -195,7 +195,7 @@ class LiteEthMACCore(Module, AutoCSR):
 
             def add_cdc(self):
                 rx_cdc = stream.ClockDomainCrossing(eth_phy_description(core_dw),
-                    cd_from  = "eth_rx",
+                    cd_from  = "eth_rx" if not dw == 64 else "sys",
                     cd_to    = "sys",
                     depth    = rx_cdc_depth,
                     buffered = rx_cdc_buffered,

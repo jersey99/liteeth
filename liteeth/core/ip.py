@@ -222,8 +222,7 @@ class LiteEthIPTX(LiteXModule):
         self.comb += checksum.reset.eq(source.valid & source.last & source.ready)
 
         # Packetizer.
-        self.packetizer = packetizer = stream.BufferizeEndpoints(
-            {"sink": stream.DIR_SINK,}, pipe_ready=True)(LiteEthIPV4Packetizer(dw))
+        self.packetizer = packetizer = LiteEthIPV4Packetizer(dw)
         self.comb += [
             sink.connect(ip_fragmenter.sink),
 

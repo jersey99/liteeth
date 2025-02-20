@@ -94,13 +94,13 @@ class LiteEthMACCore(Module, AutoCSR):
 
             def add_crc(self):
                 tx_crc = crc.LiteEthMACCRC32Inserter(eth_phy_description(datapath_dw))
-                tx_crc = BufferizeEndpoints({"sink": DIR_SINK}, {"source": DIR_SOURCE}, pipe_ready=True)(tx_crc) # FIXME: Still required?
+                tx_crc = BufferizeEndpoints({"sink": DIR_SINK}, pipe_ready=True)(tx_crc) # FIXME: Still required?
                 tx_crc = ClockDomainsRenamer(cd_tx)(tx_crc)
                 self.submodules += tx_crc
                 self.pipeline.append(tx_crc)
 
             def add_preamble(self):
-                tx_preamble = preamble.LiteEthMACPreambleInserter(datapath_dw)
+                tx_preamble = BufferizeEndpoints({"sink": DIR_SINK}, pipe_ready=True)(preamble.LiteEthMACPreambleInserter(datapath_dw))
                 tx_preamble = ClockDomainsRenamer(cd_tx)(tx_preamble)
                 self.submodules += tx_preamble
                 self.pipeline.append(tx_preamble)

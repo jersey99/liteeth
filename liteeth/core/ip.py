@@ -207,8 +207,7 @@ class LiteEthIPTX(LiteXModule):
 
         # # #
         # Fragmenter  .. TODO: Make it optional
-        self.ip_fragmenter = ip_fragmenter = stream.BufferizeEndpoints(
-            {"source": stream.DIR_SOURCE}, pipe_ready=True)(LiteEthIPV4Fragmenter(dw))
+        self.ip_fragmenter = ip_fragmenter = LiteEthIPV4Fragmenter(dw)
 
         # Buffer.
         if with_buffer:
@@ -222,7 +221,8 @@ class LiteEthIPTX(LiteXModule):
         self.comb += checksum.reset.eq(source.valid & source.last & source.ready)
 
         # Packetizer.
-        self.packetizer = packetizer = LiteEthIPV4Packetizer(dw)
+        self.packetizer = packetizer = stream.BufferizeEndpoints(
+            {"sink": stream.DIR_SINK}, pipe_ready=True)(LiteEthIPV4Packetizer(dw))
         self.comb += [
             sink.connect(ip_fragmenter.sink),
 

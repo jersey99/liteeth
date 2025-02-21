@@ -236,9 +236,11 @@ def eth_ipv4_description(dw):
 
 def eth_ipv4_user_description(dw):
     param_layout = [
-        ("length",     16),
-        ("protocol",    8),
-        ("ip_address", 32)
+        ("length",          16),
+        ("protocol",         8),
+        ("identification",  16),
+        ("flags_offset",    16),
+        ("ip_address",      32)
     ]
     payload_layout = [
         ("data",       dw),

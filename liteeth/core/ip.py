@@ -125,6 +125,10 @@ class LiteEthIPV4Fragmenter(LiteXModule):
         # Making sure we only fragment in blocks of 8 bytes
         IP_MTU = ((eth_mtu - 30 - ipv4_header_length) >> 3) << 3
         self.fsm = fsm = FSM(reset_state="IDLE")
+        self.comb += [
+            source.identification.eq(identification),
+            source.flags_offset.eq(Cat(fragment_offset, mf)),
+        ]
         fsm.act("IDLE",
                 sink.ready.eq(1),
                 source.length.eq(sink.length),
@@ -133,7 +137,7 @@ class LiteEthIPV4Fragmenter(LiteXModule):
                        NextValue(mf, 0),
                        NextValue(fragment_offset, 0),
                        NextValue(identification, 0),
-                       sink.connect(source)
+                       sink.connect(source, omit={"identification", "flags_offset"}),
                    ).Else(
                        sink.ready.eq(0),
                        counter_reset.eq(1),
@@ -237,9 +241,8 @@ class LiteEthIPTX(LiteXModule):
             packetizer.sink.total_length.eq(ip_fragmenter.source.length + ipv4_header.length),
             packetizer.sink.version.eq(0x4),     # ipv4
             packetizer.sink.ihl.eq(0x5),
-            packetizer.sink.identification.eq(ip_fragmenter.identification),
-            packetizer.sink.flags_offset.eq(Cat(ip_fragmenter.fragment_offset,
-                                                ip_fragmenter.mf)),
+            packetizer.sink.identification.eq(ip_fragmenter.source.identification),
+            packetizer.sink.flags_offset.eq(ip_fragmenter.source.flags_offset),
             packetizer.sink.ttl.eq(0x80),
             packetizer.sink.data.eq(ip_fragmenter.source.data),
             packetizer.sink.sender_ip.eq(ip_address),

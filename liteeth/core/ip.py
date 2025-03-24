@@ -121,7 +121,7 @@ class LiteEthIPV4Fragmenter(LiteXModule):
         self.mf = mf = Signal(reset=0)  # mf == More Fragments
         self.fragment_offset = fragment_offset = Signal(13, reset=0)
         self.identification = identification = Signal(16, reset=0)
-        bytes_in_fragment = Signal(16, reset=0)
+        bytes_in_fragment = Signal(14, reset=0)
         # Making sure we only fragment in blocks of 8 bytes
         IP_MTU = ((eth_mtu - 30 - ipv4_header_length) >> 3) << 3
         self.fsm = fsm = FSM(reset_state="IDLE")

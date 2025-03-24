@@ -109,14 +109,15 @@ class LiteEthIPV4Fragmenter(LiteXModule):
         self.comb += sink.connect(source)
         ww = dw // 8
         # counter logic ;)
-        counter = Signal(max=16384)
+        counter = Signal(11)
         counter_reset = Signal()
+        counter_reset_val = Signal(11)
         counter_ce = Signal()
         self.sync += \
             If(counter_reset,
-                counter.eq(0)
+                counter.eq(counter_reset_val)
             ).Elif(counter_ce,
-                counter.eq(counter + ww)
+                counter.eq(counter - 1)
             )
         self.mf = mf = Signal(reset=0)  # mf == More Fragments
         self.fragment_offset = fragment_offset = Signal(13, reset=0)
@@ -150,13 +151,13 @@ class LiteEthIPV4Fragmenter(LiteXModule):
         fsm.act("FRAGMENTED_PACKET_SEND",
                 sink.connect(source, omit={"length"}),
                 source.length.eq(bytes_in_fragment),
+                source.last.eq(counter == 1),
                 If(sink.valid & source.ready,
                    counter_ce.eq(1)
                 ),
-                If(counter == (bytes_in_fragment - ww),
+                If(source.last,
                    NextValue(fragment_offset,
                              fragment_offset + (bytes_in_fragment >> 3)),
-                   source.last.eq(1),
                    source.last_be.eq(0x80),
                    If(((fragment_offset << 3) + counter + ww) == sink.length,
                       NextValue(fragment_offset, 0),
@@ -173,14 +174,15 @@ class LiteEthIPV4Fragmenter(LiteXModule):
                 sink.ready.eq(0),
                 source.valid.eq(0),
                 source.length.eq(bytes_in_fragment),
+                counter_reset.eq(1),
                 If((sink.length - (fragment_offset << 3)) > IP_MTU,
                     NextValue(bytes_in_fragment, IP_MTU),
-                    counter_reset.eq(1)
+                    counter_reset_val.eq(bytes_in_fragment >> 3),
                 ).Else(
                     NextValue(bytes_in_fragment,
                               sink.length - (fragment_offset << 3)),
                     NextValue(mf, 0),
-                    counter_reset.eq(1)
+                    counter_reset_val.eq((sink.length - (fragment_offset << 3)) >> 3)
                 ),
                 NextState("FRAGMENTED_PACKET_SEND")
         )

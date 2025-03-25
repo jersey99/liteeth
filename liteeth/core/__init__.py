@@ -109,7 +109,7 @@ class LiteEthVLANUDPIPCore(LiteXModule):
         self.packetizer   = stream.BufferizeEndpoints(
             {"sink": stream.DIR_SINK}, pipe_ready=True)(LiteEthMACVLANPacketizer(dw))
         self.depacketizer = stream.BufferizeEndpoints(
-            {"sink": stream.DIR_SINK, "source": stream.DIR_SOURCE}, pipe_ready=True)(LiteEthMACVLANDepacketizer(dw))
+            {"source": stream.DIR_SOURCE}, pipe_ready=True)(LiteEthMACVLANDepacketizer(dw))
 
         self.comb += [
             vlan_mac_port.sink.ethernet_type.eq(ethernet_8021q_tpid),

@@ -100,7 +100,7 @@ class LiteEthMACCore(Module, AutoCSR):
                 self.pipeline.append(tx_crc)
 
             def add_preamble(self):
-                tx_preamble = preamble.LiteEthMACPreambleInserter(datapath_dw)
+                tx_preamble = BufferizeEndpoints({"sink": DIR_SINK}, pipe_ready=True)(preamble.LiteEthMACPreambleInserter(datapath_dw))
                 tx_preamble = ClockDomainsRenamer(cd_tx)(tx_preamble)
                 self.submodules += tx_preamble
                 self.pipeline.append(tx_preamble)

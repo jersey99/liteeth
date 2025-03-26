@@ -387,7 +387,7 @@ class LiteEthIP(LiteXModule):
             {"source": stream.DIR_SOURCE}, pipe_ready=True)(LiteEthIPRX(mac_address, ip_address, with_broadcast, dw=dw))
         if vlan_id is not False:
             assert(type(vlan_id) is Signal)
-            mac_port = mac.crossbar.get_port((vlan_id << 16) | ethernet_type_ip, dw=dw)
+            mac_port = mac.vlan_mac_crossbars[vlan_id].get_port(ethernet_type_ip, dw=dw)
             self.comb += [
                 mac_port.sink.vid.eq(vlan_id),
                 tx.source.connect(mac_port.sink),

@@ -14,7 +14,7 @@ from liteeth.core.ip   import LiteEthIP
 from liteeth.core.udp  import LiteEthUDP
 from liteeth.core.icmp import LiteEthICMP
 
-from liteeth.mac.common import LiteEthMACVLANCrossbar, LiteEthMACVLANPacketizer, LiteEthMACVLANDepacketizer
+from liteeth.mac.common import LiteEthMACVLANCrossbar, LiteEthMACVLANMACCrossbar, LiteEthMACVLANPacketizer, LiteEthMACVLANDepacketizer
 
 # IP Core ------------------------------------------------------------------------------------------
 
@@ -91,21 +91,21 @@ class LiteEthVLANUDPIPCore(LiteXModule):
         ip_address = convert_ip(ip_address)
         self.mac = LiteEthMAC(phy, dw, interface="crossbar", with_preamble_crc=True)
 
-        self.arp = LiteEthARP(self.mac, mac_address, ip_address, clk_freq, dw=dw)
-        self.ip  = LiteEthIP(self.mac, mac_address, ip_address, self.arp.table, with_broadcast=False, dw=dw)
+        # self.arp = LiteEthARP(self.mac, mac_address, ip_address, clk_freq, dw=dw)
+        # self.ip  = LiteEthIP(self.mac, mac_address, ip_address, self.arp.table, with_broadcast=False, dw=dw)
 
-        if with_icmp:
-            self.icmp = LiteEthICMP(
-                ip         = self.ip,
-                ip_address = ip_address,
-                dw         = dw,
-            )
+        # if with_icmp:
+        #     self.icmp = LiteEthICMP(
+        #         ip         = self.ip,
+        #         ip_address = ip_address,
+        #         dw         = dw,
+        #     )
 
-        self.udp = LiteEthUDP(self.ip, ip_address, dw=dw)
+        # self.udp = LiteEthUDP(self.ip, ip_address, dw=dw)
 
         vlan_mac_port = self.mac.crossbar.get_port(ethernet_8021q_tpid, dw=dw)
 
-        self.crossbar     = LiteEthMACVLANCrossbar(dw)
+        self.vlan_crossbar     = LiteEthMACVLANCrossbar(dw)
         self.packetizer   = stream.BufferizeEndpoints(
             {"sink": stream.DIR_SINK}, pipe_ready=True)(LiteEthMACVLANPacketizer(dw))
         self.depacketizer = stream.BufferizeEndpoints(
@@ -113,18 +113,31 @@ class LiteEthVLANUDPIPCore(LiteXModule):
 
         self.comb += [
             vlan_mac_port.sink.ethernet_type.eq(ethernet_8021q_tpid),
-            self.crossbar.master.source.connect(self.packetizer.sink),
+            self.vlan_crossbar.master.source.connect(self.packetizer.sink),
             self.packetizer.source.target_mac.eq(self.packetizer.sink.target_mac),
             self.packetizer.source.sender_mac.eq(self.packetizer.sink.sender_mac),
             self.packetizer.source.connect(vlan_mac_port.sink, omit={'ethernet_type'}),
             vlan_mac_port.source.connect(self.depacketizer.sink),
-            self.depacketizer.source.connect(self.crossbar.master.sink),
+            self.depacketizer.source.connect(self.vlan_crossbar.master.sink),
+        ]
+        self.vlan_mac_crossbars = {}
+
+
+    def add_vlan(self, index, vlan_ip="192.168.3.50", vlan_id=2001):
+        vlan_port = self.vlan_crossbar.get_port(vlan_id)
+
+        # This is a new crossbar that provides ports for ARP and IP inside the VLAN
+        vlan_mac_crossbar = self.vlan_mac_crossbars[vlan_id] = LiteEthMACVLANMACCrossbar(self.dw)
+        setattr(self, f"vlan_mac_crossbar{index}", vlan_mac_crossbar)
+
+        self.comb += [
+            vlan_mac_crossbar.master.source.connect(vlan_port.sink),
+            vlan_port.source.connect(vlan_mac_crossbar.master.sink),
         ]
 
-    def add_vlan(self, vlan_ip="192.168.3.50", vlan_id=2001):
         vlan_ip_address = convert_ip(vlan_ip)
         arp = LiteEthARP(self, self.mac_address, vlan_ip_address,
-                                              self.clk_freq, dw=self.dw, vlan_id=vlan_id)
+                         self.clk_freq, dw=self.dw, vlan_id=vlan_id)
         setattr(self.submodules, f"vlan_{vlan_id}_arp", arp)
         ip  = LiteEthIP(self, self.mac_address, vlan_ip_address,
                         arp.table, dw=self.dw, vlan_id=vlan_id)

@@ -142,9 +142,9 @@ class LiteEthVLANUDPIPCore(LiteXModule):
         ip  = LiteEthIP(self, self.mac_address, vlan_ip_address,
                         arp.table, dw=self.dw, vlan_id=vlan_id)
         setattr(self.submodules, f"vlan_{vlan_id}_ip", ip)
-        if self.with_icmp:
-            icmp = LiteEthICMP(ip, vlan_ip_address, dw=self.dw)
-            setattr(self.submodules, f"vlan_{vlan_id}_icmp", icmp)
+        # if self.with_icmp:
+        #     icmp = LiteEthICMP(ip, vlan_ip_address, dw=self.dw)
+        #     setattr(self.submodules, f"vlan_{vlan_id}_icmp", icmp)
 
         udp = LiteEthUDP(ip, vlan_ip_address, dw=self.dw)
         setattr(self.submodules, f"vlan_{vlan_id}_udp", udp)

@@ -130,9 +130,18 @@ class LiteEthVLANUDPIPCore(LiteXModule):
         vlan_mac_crossbar = self.vlan_mac_crossbars[vlan_id] = LiteEthMACVLANMACCrossbar(self.dw)
         setattr(self, f"vlan_mac_crossbar{index}", vlan_mac_crossbar)
 
+        buff_sink = stream.Buffer(eth_mac_vlan_description(self.dw))
+        setattr(self, f"vlan_mac_buff_sink{index}", buff_sink)
+
+        buff_source = stream.Buffer(eth_mac_vlan_description(self.dw))
+        setattr(self, f"vlan_mac_buff_source{index}", buff_source)
+
         self.comb += [
-            vlan_mac_crossbar.master.source.connect(vlan_port.sink),
-            vlan_port.source.connect(vlan_mac_crossbar.master.sink),
+            vlan_mac_crossbar.master.source.connect(buff_source.sink),
+            buff_source.source.connect(vlan_port.sink),
+
+            vlan_port.source.connect(buff_sink.sink),
+            buff_sink.source.connect(vlan_mac_crossbar.master.sink),
         ]
 
         vlan_ip_address = convert_ip(vlan_ip)

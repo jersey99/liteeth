@@ -124,7 +124,7 @@ class LiteEthVLANUDPIPCore(LiteXModule):
 
 
     def add_vlan(self, index, vlan_ip="192.168.3.50", vlan_id=2001):
-        vlan_port = self.vlan_crossbar.get_port(vlan_id)
+        vlan_port = self.vlan_crossbar.get_port(vlan_id, dw=self.dw)
 
         # This is a new crossbar that provides ports for ARP and IP inside the VLAN
         vlan_mac_crossbar = self.vlan_mac_crossbars[vlan_id] = LiteEthMACVLANMACCrossbar(self.dw)

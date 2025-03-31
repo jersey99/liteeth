@@ -153,19 +153,19 @@ class LiteEthIPV4Fragmenter(LiteXModule):
                 source.length.eq(bytes_in_fragment),
                 source.last.eq(counter == 1),
                 If(sink.valid & source.ready,
-                   counter_ce.eq(1)
-                ),
-                If(source.last,
-                   NextValue(fragment_offset,
-                             fragment_offset + (bytes_in_fragment >> 3)),
-                   source.last_be.eq(0x80),
-                   If(((fragment_offset << 3) + counter + ww) == sink.length,
-                      NextValue(fragment_offset, 0),
-                      NextState("IDLE")
-                   ).Else(
-                       counter_ce.eq(0),
-                       NextState("NEXT_FRAGMENT")
-                   )
+                   counter_ce.eq(1),
+                   If(source.last,
+                      NextValue(fragment_offset,
+                                fragment_offset + (bytes_in_fragment >> 3)),
+                      source.last_be.eq(0x80),
+                      If(((fragment_offset << 3) + bytes_in_fragment) == sink.length,
+                         NextValue(fragment_offset, 0),
+                         NextState("IDLE")
+                         ).Else(
+                             counter_ce.eq(0),
+                             NextState("NEXT_FRAGMENT")
+                        )
+                    )
                 )
         )
 
@@ -177,7 +177,7 @@ class LiteEthIPV4Fragmenter(LiteXModule):
                 counter_reset.eq(1),
                 If((sink.length - (fragment_offset << 3)) > IP_MTU,
                     NextValue(bytes_in_fragment, IP_MTU),
-                    counter_reset_val.eq(bytes_in_fragment >> 3),
+                    counter_reset_val.eq(IP_MTU >> 3),
                 ).Else(
                     NextValue(bytes_in_fragment,
                               sink.length - (fragment_offset << 3)),

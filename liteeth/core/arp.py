@@ -167,7 +167,7 @@ class LiteEthARPCache(LiteXModule):
 
         # Enable.
         self.enable       = Signal(reset=1)
-        self.clear_enable = Signal(reset=1)
+        self.clear_enable = Signal(reset=0)
 
         # # #
 

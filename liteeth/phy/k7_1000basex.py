@@ -341,9 +341,8 @@ class K7_1000BASEX(LiteXModule):
             p_RX_DFE_XYD_CFG               = 0b0000000000000,
 
             # TX Configurable Driver Attributes
-            p_TX_PREDRIVER_MODE            = 0b0
-        )
-        gtx_params.update(
+            p_TX_PREDRIVER_MODE            = 0b0,
+
             # CPLL Ports
             o_CPLLFBCLKLOST    = Open(),
             o_CPLLLOCK         = pll.lock,
@@ -484,9 +483,9 @@ class K7_1000BASEX(LiteXModule):
             o_RXBYTEISALIGNED  = Open(),
             o_RXBYTEREALIGN    = Open(),
             o_RXCOMMADET       = Open(),
-            i_RXCOMMADETEN     = 1,
-            i_RXMCOMMAALIGNEN  = 1,
-            i_RXPCOMMAALIGNEN  = 1,
+            i_RXCOMMADETEN     = 0b1,
+            i_RXMCOMMAALIGNEN  = pcs.align,
+            i_RXPCOMMAALIGNEN  = pcs.align,
 
             # Receive Ports - RX Channel Bonding Ports
             o_RXCHANBONDSEQ    = Open(),

@@ -14,6 +14,8 @@ from migen import *
 
 from litex.soc.interconnect.stream import *
 
+# Helpers ------------------------------------------------------------------------------------------
+
 # Function to iterate over chunks of data, from
 # https://docs.python.org/3/library/itertools.html#itertools-recipes
 def grouper(iterable, n, fillvalue=None):
@@ -21,6 +23,18 @@ def grouper(iterable, n, fillvalue=None):
     # grouper('ABCDEFG', 3, 'x') --> ABC DEF Gxx"
     args = [iter(iterable)] * n
     return itertools.zip_longest(*args, fillvalue=fillvalue)
+
+def mask_last_be(dw, data, last_be):
+    masked_data = 0
+
+    for byte in range(dw // 8):
+        if 2**byte > last_be:
+            break
+        masked_data |= data & (0xFF << (byte * 8))
+
+    return masked_data
+
+# Stream Packet ------------------------------------------------------------------------------------
 
 class StreamPacket:
     def __init__(self, data, params={}):
@@ -76,13 +90,16 @@ class StreamPacket:
 
         return True
 
+# Stream Inserter ----------------------------------------------------------------------------------
+
 def stream_inserter(
         sink,
         src,
-        seed=42,
-        valid_rand=50,
-        debug_print=False,
-        broken_8bit_last_be=True):
+        seed                = 42,
+        valid_rand          = 50,
+        debug_print         = False,
+        broken_8bit_last_be = True
+    ):
     """Insert a list of packets of bytes on to the stream interface `sink`. If
     `sink` has a `last_be` signal, that is set accordingly.
 
@@ -183,14 +200,17 @@ def stream_inserter(
     # deasserted, yield once to properly apply that value.
     yield
 
+# Stream Collector ---------------------------------------------------------------------------------
+
 def stream_collector(
         source,
-        dest=[],
-        expect_npackets=None,
-        stop_cond=None,
-        seed=42,
-        ready_rand=50,
-        debug_print=False):
+        dest            = [],
+        expect_npackets = None,
+        stop_cond       = None,
+        seed            = 42,
+        ready_rand      = 50,
+        debug_print     = False
+    ):
     """Consume some packets of bytes from the stream interface
     `source`. If `source` has a `last_be` signal, that is respected
     properly.
@@ -251,6 +271,7 @@ def stream_collector(
                 if (yield source.last) == 1:
                     read_last = True
                     if hasattr(source, "last_be") and \
+                       dw != 8 and \
                        2**byte > (yield source.last_be):
                         break
                 collected_bytes += [((data >> (byte * 8)) & 0xFF)]
@@ -273,6 +294,8 @@ def stream_collector(
         if debug_print:
             print("Received packet {}.".format(len(dest) - 1), file=sys.stderr)
 
+# Generate Test Packets ----------------------------------------------------------------------------
+
 def generate_test_packets(npackets, seed=42):
     # Generate a number of last-terminated bus transaction byte contents (dubbed
     # packets)
@@ -289,6 +312,8 @@ def generate_test_packets(npackets, seed=42):
 
     return packets
 
+# Compare Packets ----------------------------------------------------------------------------------
+
 def compare_packets(packets_a, packets_b):
     if len(packets_a) != len(packets_b):
         print("Length mismatch in number of received packets: {} {}"
@@ -303,6 +328,8 @@ def compare_packets(packets_a, packets_b):
 
     return True
 
+# Test Stream --------------------------------------------------------------------------------------
+
 class TestStream(unittest.TestCase):
     def pipe_test(self, dut, seed=42, npackets=64, debug_print=False):
         # Get some data to test with
@@ -312,20 +339,19 @@ class TestStream(unittest.TestCase):
         recvd_packets = []
 
         run_simulation(
-            dut,
-            [
+            dut, [
                 stream_inserter(
                     dut.sink,
-                    src=packets,
-                    debug_print=debug_print,
-                    seed=seed,
+                    src         = packets,
+                    debug_print = debug_print,
+                    seed        = seed,
                 ),
                 stream_collector(
                     dut.source,
-                    dest=recvd_packets,
-                    expect_npackets=npackets,
-                    debug_print=debug_print,
-                    seed=seed,
+                    dest            = recvd_packets,
+                    expect_npackets = npackets,
+                    debug_print     = debug_print,
+                    seed            = seed,
                 ),
             ],
         )

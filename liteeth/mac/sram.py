@@ -40,8 +40,8 @@ class LiteEthMACSRAMWriter(LiteXModule):
             self._timestamp = CSRStatus(timestampbits)
 
         # Event Manager.
-        self.ev = EventManager()
-        self.ev.available  = EventSourceLevel()
+        self.ev           = EventManager()
+        self.ev.available = EventSourceLevel()
         self.ev.finalize()
 
         # # #
@@ -149,7 +149,7 @@ class LiteEthMACSRAMWriter(LiteXModule):
         mems  = [None] * nslots
         ports = [None] * nslots
         for n in range(nslots):
-            mems[n]  = Memory(dw, depth)
+            mems[n]  = Memory(dw, depth, name=f"mac_sram_writer_slot{n}")
             ports[n] = mems[n].get_port(write_capable=True)
             self.specials += ports[n]
         self.mems = mems
@@ -160,14 +160,13 @@ class LiteEthMACSRAMWriter(LiteXModule):
         # Connect Memory ports.
         cases = {}
         for n, port in enumerate(ports):
-            cases[n] = [
-                ports[n].adr.eq(wr_addr),
-                ports[n].dat_w.eq(wr_data),
-                If(sink.valid & write,
-                    ports[n].we.eq(2**len(ports[n].we) - 1)
-                )
+            self.comb += [
+                port.adr.eq(wr_addr),
+                port.dat_w.eq(wr_data),
             ]
-        self.comb += Case(wr_slot, cases)
+            cases[n] = [port.we.eq(1)]
+
+        self.comb += If(sink.valid & write, Case(wr_slot, cases))
 
 # MAC SRAM Reader ----------------------------------------------------------------------------------
 
@@ -195,8 +194,8 @@ class LiteEthMACSRAMReader(LiteXModule):
             self._timestamp      = CSRStatus(timestampbits)
 
         # Event Manager.
-        self.ev = EventManager()
-        self.ev.done       = EventSourcePulse() if timestamp is None else EventSourceLevel()
+        self.ev      = EventManager()
+        self.ev.done = EventSourcePulse() if timestamp is None else EventSourceLevel()
         self.ev.finalize()
 
         # # #
@@ -283,7 +282,7 @@ class LiteEthMACSRAMReader(LiteXModule):
         mems    = [None]*nslots
         ports   = [None]*nslots
         for n in range(nslots):
-            mems[n]  = Memory(dw, depth)
+            mems[n]  = Memory(dw, depth, name=f"mac_sram_reader_slot{n}")
             ports[n] = mems[n].get_port(has_re=True, mode=READ_FIRST)
             self.specials += ports[n]
         self.mems = mems
@@ -291,8 +290,10 @@ class LiteEthMACSRAMReader(LiteXModule):
         # Connect Memory ports.
         cases = {}
         for n, port in enumerate(ports):
-            self.comb += port.re.eq(read)
-            self.comb += port.adr.eq(length[int(math.log2(dw//8)):])
+            self.comb += [
+                port.re.eq(read),
+                port.adr.eq(length[int(math.log2(dw//8)):]),
+            ]
             cases[n] = [rd_data.eq(port.dat_r)]
 
         self.comb += Case(rd_slot, cases)

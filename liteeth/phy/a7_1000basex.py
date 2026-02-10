@@ -80,7 +80,7 @@ class A7_1000BASEX(LiteXModule):
 
 
         # Work around Python's 255 argument limitation.
-        gtp_params = dict(
+        self.gtp_params = gtp_params = dict(
             # Simulation-Only Attributes
             p_SIM_RECEIVER_DETECT_PASS   = "TRUE",
             p_SIM_TX_EIDLE_DRIVE_LEVEL   = "X",
@@ -90,7 +90,7 @@ class A7_1000BASEX(LiteXModule):
             # RX Byte and Word Alignment Attributes
             p_ALIGN_COMMA_DOUBLE         = "FALSE",
             p_ALIGN_COMMA_ENABLE         = 0b1111111111,
-            p_ALIGN_COMMA_WORD           = 1,
+            p_ALIGN_COMMA_WORD           = 2,
             p_ALIGN_MCOMMA_DET           = "TRUE",
             p_ALIGN_MCOMMA_VALUE         = 0b1010000011,
             p_ALIGN_PCOMMA_DET           = "TRUE",
@@ -212,7 +212,7 @@ class A7_1000BASEX(LiteXModule):
 
             # CDR Attributes
             p_RXCDR_CFG                  = {
-                1.25e9  : 0x0001107FE086021101010,
+                1.25e9  : 0x0000107FE106001041010,
                 3.125e9 : 0x0000107FE206001041010,
             }[self.linerate],
             p_RXCDR_FR_RESET_ON_EIDLE    = 0b0,
@@ -505,9 +505,9 @@ class A7_1000BASEX(LiteXModule):
             o_RXBYTEISALIGNED      = Open(),
             o_RXBYTEREALIGN        = Open(),
             o_RXCOMMADET           = Open(),
-            i_RXCOMMADETEN         = 0,
-            i_RXMCOMMAALIGNEN      = 0,
-            i_RXPCOMMAALIGNEN      = 0,
+            i_RXCOMMADETEN         = 0b1,
+            i_RXMCOMMAALIGNEN      = pcs.align,
+            i_RXPCOMMAALIGNEN      = pcs.align,
             i_RXSLIDE              = 0,
             # Receive Ports - RX Channel Bonding Ports
             o_RXCHANBONDSEQ        = Open(),
@@ -698,7 +698,6 @@ class A7_1000BASEX(LiteXModule):
             )
         else:
             raise ValueError
-        self.specials += Instance("GTPE2_CHANNEL", **gtp_params)
 
         # Get 125MHz clocks back - the GTP is outputting 62.5MHz.
         txoutclk_rebuffer = Signal()
@@ -788,6 +787,9 @@ class A7_1000BASEX(LiteXModule):
     def add_csr(self):
         self._reset = CSRStorage()
         self.comb += self.reset.eq(self._reset.storage)
+
+    def do_finalize(self):
+        self.specials += Instance("GTPE2_CHANNEL", **self.gtp_params)
 
 # A7_2500BASEX PHY ---------------------------------------------------------------------------------
 

@@ -343,8 +343,6 @@ class V7_1000BASEX(LiteXModule):
             # TX Configurable Driver Attributes
             p_TX_QPI_STATUS_EN             = 0b0,
 
-        )
-        gth_params.update(
             # CPLL Ports
             o_CPLLFBCLKLOST    = Open(),
             o_CPLLLOCK         = pll.lock,
@@ -479,9 +477,9 @@ class V7_1000BASEX(LiteXModule):
             o_RXBYTEISALIGNED  = Open(),
             o_RXBYTEREALIGN    = Open(),
             o_RXCOMMADET       = Open(),
-            i_RXCOMMADETEN     = 1,
-            i_RXMCOMMAALIGNEN  = 1,
-            i_RXPCOMMAALIGNEN  = 1,
+            i_RXCOMMADETEN     = 0b1,
+            i_RXMCOMMAALIGNEN  = pcs.align,
+            i_RXPCOMMAALIGNEN  = pcs.align,
 
             # Receive Ports - RX Channel Bonding Ports
             o_RXCHANBONDSEQ    = Open(),

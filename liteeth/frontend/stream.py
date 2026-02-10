@@ -8,25 +8,30 @@ from litex.gen import *
 
 from liteeth.common import *
 
-# Stream to UDP TX -----------------------------------------------------------------------------------
+# Stream to UDP TX ---------------------------------------------------------------------------------
 
 class LiteEthStream2UDPTX(LiteXModule):
-    def __init__(self, ip_address, udp_port, data_width=8, fifo_depth=None):
+    def __init__(self, ip_address=0, udp_port=0, data_width=8, fifo_depth=None, with_csr=False):
         self.sink   = sink   = stream.Endpoint(eth_tty_tx_description(data_width))
         self.source = source = stream.Endpoint(eth_udp_user_description(data_width))
 
         # # #
 
-        ip_address = convert_ip(ip_address)
+        self.ip_address = Signal(32, reset=convert_ip(ip_address))
+        self.udp_port   = Signal(16, reset=udp_port)
+        self.enable     = Signal(reset=1)
+
+        if with_csr:
+            self.add_csr()
 
         if fifo_depth is None:
             self.comb += [
                 sink.connect(source, keep={"valid", "ready", "data"}),
                 source.last.eq(1),
-                source.src_port.eq(udp_port),
-                source.dst_port.eq(udp_port),
-                source.ip_address.eq(ip_address),
-                source.length.eq(data_width//8)
+                source.src_port.eq(self.udp_port),
+                source.dst_port.eq(self.udp_port),
+                source.ip_address.eq(self.ip_address),
+                source.length.eq(data_width // 8)
             ]
         else:
             level   = Signal(max=fifo_depth+1)
@@ -38,12 +43,14 @@ class LiteEthStream2UDPTX(LiteXModule):
             self.fifo = fifo = stream.SyncFIFO([("data", data_width)], fifo_depth, buffered=True)
             self.comb += sink.connect(fifo.sink)
 
-            self.fsm = fsm = FSM(reset_state="IDLE")
+            self.fsm = fsm = ResetInserter()(FSM(reset_state="IDLE"))
+            self.comb += fsm.reset.eq(~self.enable)
+
             fsm.act("IDLE",
                 NextValue(counter, 0),
-                NextValue(_ip_address, ip_address),
-                NextValue(_udp_port,     udp_port),
-                # Send FIFO contenst when:
+                NextValue(_ip_address, self.ip_address),
+                NextValue(_udp_port, self.udp_port),
+                # Send FIFO contents when:
                 # - We have a full packet:
                 If(fifo.sink.valid & fifo.sink.ready & fifo.sink.last,
                     NextValue(level, fifo.level + 1), # +1 for level latency.
@@ -79,25 +86,47 @@ class LiteEthStream2UDPTX(LiteXModule):
                 )
             )
 
+    def add_csr(self):
+        self._enable     = CSRStorage(1, description="Enable Module", reset=1)
+        self._ip_address = CSRStorage(32, description="IP Address", reset=self.ip_address.reset.value)
+        self._udp_port   = CSRStorage(16, description="UDP Port",   reset=self.udp_port.reset.value)
+
+        # # #
+
+        self.comb += [
+            self.enable.eq(self._enable.storage),
+            self.ip_address.eq(self._ip_address.storage),
+            self.udp_port.eq(self._udp_port.storage),
+        ]
+
+
 # UDP to Stream RX ---------------------------------------------------------------------------------
 
 class LiteEthUDP2StreamRX(LiteXModule):
-    def __init__(self, ip_address=None, udp_port=None, data_width=8, fifo_depth=None, with_broadcast=True):
+    def __init__(self, ip_address=0, udp_port=0, data_width=8, fifo_depth=None, with_broadcast=True, with_csr=False):
         self.sink   = sink   = stream.Endpoint(eth_udp_user_description(data_width))
         self.source = source = stream.Endpoint(eth_tty_rx_description(data_width))
 
         # # #
 
+        self.ip_address = Signal(32, reset=convert_ip(ip_address))
+        self.udp_port   = Signal(16, reset=udp_port)
+        self.enable     = Signal(reset=1)
+
+        if with_csr:
+            self.add_csr()
+
         valid = Signal(reset=1)
 
+        # Disable RX when enable=0.
+        self.comb += If(~self.enable, valid.eq(0))
+
         # Check UDP Port.
-        assert udp_port is not None
-        self.comb += If(sink.dst_port != udp_port, valid.eq(0))
+        self.comb += If(sink.dst_port != self.udp_port, valid.eq(0))
 
         # Check IP Address (Optional).
-        if (ip_address is not None) and (not with_broadcast):
-            ip_address = convert_ip(ip_address)
-            self.comb += If(sink.ip_address != ip_address, valid.eq(0))
+        if not with_broadcast:
+            self.comb += If(sink.ip_address != self.ip_address, valid.eq(0))
 
         # Data-Path / Buffering (Optional).
         if fifo_depth is None:
@@ -118,6 +147,18 @@ class LiteEthUDP2StreamRX(LiteXModule):
                 sink.ready.eq(fifo.sink.ready | ~valid),
                 fifo.source.connect(source)
             ]
+
+    def add_csr(self):
+        self._enable     = CSRStorage(1,  description="Enable Module", reset=1)
+        self._ip_address = CSRStorage(32, description="IP Address",    reset=self.ip_address.reset.value)
+        self._udp_port   = CSRStorage(16, description="UDP Port",      reset=self.udp_port.reset.value)
+
+        self.comb += [
+            self.enable.eq(self._enable.storage),
+            self.ip_address.eq(self._ip_address.storage),
+            self.udp_port.eq(self._udp_port.storage),
+        ]
+
 
 # UDP Streamer -------------------------------------------------------------------------------------
 

@@ -2,9 +2,8 @@
 # This file is part of MiSoC and has been adapted/modified for LiteEth.
 #
 # Copyright (c) 2018-2020 Sebastien Bourdeauducq <sb@m-labs.hk>
+# Copyright (c) 2024 Florent Kermarrec <florent@enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
-
-from math import ceil
 
 from migen import *
 from migen.genlib.fsm import *
@@ -15,248 +14,10 @@ from litex.gen.genlib.misc import WaitTimer
 from litex.gen.genlib.cdc import BusSynchronizer
 
 from litex.soc.interconnect import stream
+from litex.soc.interconnect.csr_eventmanager import *
 from litex.soc.cores.code_8b10b import K, D, Encoder, Decoder
 
 from liteeth.common import *
-
-# PCS TX -------------------------------------------------------------------------------------------
-
-class PCSTX(LiteXModule):
-    def __init__(self, lsb_first=False):
-        self.config_valid = Signal()
-        self.config_reg   = Signal(16)
-        self.tx_valid     = Signal()
-        self.tx_ready     = Signal()
-        self.tx_data      = Signal(8)
-
-        self.encoder = Encoder(lsb_first=lsb_first)
-
-        # SGMII Speed Adaptation
-        self.sgmii_speed = Signal(2)
-
-        # # #
-
-        parity = Signal()
-        c_type = Signal()
-        self.sync += parity.eq(~parity)
-
-        config_reg_buffer      = Signal(16)
-        load_config_reg_buffer = Signal()
-        self.sync += If(load_config_reg_buffer, config_reg_buffer.eq(self.config_reg))
-
-        # Timer for SGMII data rates.
-        timer    = Signal(max=1000)
-        timer_en = Signal()
-        self.sync += [
-            If(~timer_en | (timer == 0),
-                If(self.sgmii_speed == 0b00,
-                    timer.eq(99)
-                ).Elif(self.sgmii_speed == 0b01,
-                    timer.eq(9)
-                ).Elif(self.sgmii_speed == 0b10,
-                    timer.eq(0)
-                )
-            ).Elif(timer_en,
-                timer.eq(timer - 1)
-            )
-        ]
-
-        self.fsm = fsm = FSM()
-        fsm.act("START",
-            If(self.config_valid,
-                self.tx_ready.eq(1),  # Discard TX data if we are in config_reg phase.
-                load_config_reg_buffer.eq(1),
-                self.encoder.k[0].eq(1),
-                self.encoder.d[0].eq(K(28, 5)),
-                NextState("CONFIG_D")
-            ).Else(
-                If(self.tx_valid,
-                    # The first byte sent is replaced by /S/.
-                    self.tx_ready.eq((timer == 0)),
-                    timer_en.eq(1),
-                    self.encoder.k[0].eq(1),
-                    self.encoder.d[0].eq(K(27, 7)),
-                    NextState("DATA")
-                ).Else(
-                    self.tx_ready.eq(1),  # Discard TX data.
-                    self.encoder.k[0].eq(1),
-                    self.encoder.d[0].eq(K(28, 5)),
-                    NextState("IDLE")
-                )
-            )
-        )
-        fsm.act("CONFIG_D",
-            If(c_type,
-                self.encoder.d[0].eq(D(2, 2))
-            ).Else(
-                self.encoder.d[0].eq(D(21, 5))
-            ),
-            NextValue(c_type, ~c_type),
-            NextState("CONFIG_REG_LSB")
-        ),
-        fsm.act("CONFIG_REG_LSB",
-            self.encoder.d[0].eq(config_reg_buffer[:8]),
-            NextState("CONFIG_REG_MSB")
-        )
-        fsm.act("CONFIG_REG_MSB",
-            self.encoder.d[0].eq(config_reg_buffer[8:]),
-            NextState("START")
-        )
-        fsm.act("IDLE",
-            # Due to latency in the encoder, we read here the disparity
-            # just before the K28.5 was sent. K28.5 flips the disparity.
-            If(self.encoder.disparity[0],
-                # Correcting /I1/ (D5.6 preserves the disparity).
-                self.encoder.d[0].eq(D(5, 6))
-            ).Else(
-                # Preserving /I2/ (D16.2 flips the disparity).
-                self.encoder.d[0].eq(D(16, 2))
-            ),
-            NextState("START")
-        )
-        fsm.act("DATA",
-            If(self.tx_valid,
-                self.tx_ready.eq((timer == 0)),
-                timer_en.eq(1),
-                self.encoder.d[0].eq(self.tx_data)
-            ).Else(
-                self.tx_ready.eq(1),
-                # /T/
-                self.encoder.k[0].eq(1),
-                self.encoder.d[0].eq(K(29, 7)),
-                NextState("CARRIER_EXTEND_1")
-            )
-        )
-        fsm.act("CARRIER_EXTEND_1",
-            # /R/
-            self.encoder.k[0].eq(1),
-            self.encoder.d[0].eq(K(23, 7)),
-            If(parity,
-                NextState("START")
-            ).Else(
-                NextState("CARRIER_EXTEND_2")
-            )
-        )
-        fsm.act("CARRIER_EXTEND_2",
-            # /R/
-            self.encoder.k[0].eq(1),
-            self.encoder.d[0].eq(K(23, 7)),
-            NextState("START")
-        )
-
-# PCS RX -------------------------------------------------------------------------------------------
-
-class PCSRX(LiteXModule):
-    def __init__(self, lsb_first=False):
-        self.rx_en   = Signal()
-        self.rx_data = Signal(8)
-
-        self.seen_valid_ci   = Signal()
-        self.seen_config_reg = Signal()
-        self.config_reg      = Signal(16)
-
-        self.decoder = Decoder(lsb_first=lsb_first)
-
-        # SGMII Speed Adaptation.
-        self.sgmii_speed = Signal(2)
-        self.sample_en   = Signal()
-
-        # # #
-
-        config_reg_lsb      = Signal(8)
-        load_config_reg_lsb = Signal()
-        load_config_reg_msb = Signal()
-        self.sync += [
-            self.seen_config_reg.eq(0),
-            If(load_config_reg_lsb, 
-                config_reg_lsb.eq(self.decoder.d)
-            ),
-            If(load_config_reg_msb,
-                self.config_reg.eq(Cat(config_reg_lsb, self.decoder.d)),
-                self.seen_config_reg.eq(1)
-            )
-        ]
-
-        first_preamble_byte = Signal()
-        self.comb += self.rx_data.eq(Mux(first_preamble_byte, 0x55, self.decoder.d))
-
-        # Timer for SGMII data rates.
-        timer    = Signal(max=1000)
-        timer_en = Signal()
-        self.sync += [
-            If(~timer_en | (timer == 0),
-                If(self.sgmii_speed == 0b00,
-                    timer.eq(99)
-                ).Elif(self.sgmii_speed == 0b01,
-                    timer.eq(9)
-                ).Elif(self.sgmii_speed == 0b10,
-                    timer.eq(0)
-                )
-            ).Elif(timer_en,
-                timer.eq(timer - 1)
-            )
-        ]
-
-        # Speed adaptation
-        self.comb += self.sample_en.eq(self.rx_en & (timer == 0))
-
-        self.fsm = fsm = FSM()
-        fsm.act("START",
-            If(self.decoder.k,
-                If(self.decoder.d == K(28, 5),
-                    NextState("K28_5")
-                ),
-                If(self.decoder.d == K(27, 7),
-                    self.rx_en.eq(1),
-                    timer_en.eq(1),
-                    first_preamble_byte.eq(1),
-                    NextState("DATA")
-                )
-            )
-        )
-        fsm.act("K28_5",
-            NextState("START"),
-            If(~self.decoder.k,
-                If((self.decoder.d == D(21, 5)) | (self.decoder.d == D(2, 2)),
-                    self.seen_valid_ci.eq(1),
-                    NextState("CONFIG_REG_LSB")
-                ),
-                If((self.decoder.d == D(5, 6)) | (self.decoder.d == D(16, 2)),
-                    # idle
-                    self.seen_valid_ci.eq(1),
-                    NextState("START")
-                ),
-            )
-        )
-        fsm.act("CONFIG_REG_LSB",
-            If(self.decoder.k,
-                If(self.decoder.d == K(27, 7),
-                    self.rx_en.eq(1),
-                    timer_en.eq(1),
-                    first_preamble_byte.eq(1),
-                    NextState("DATA")
-                ).Else(
-                    NextState("START")  # error
-                )
-            ).Else(
-                load_config_reg_lsb.eq(1),
-                NextState("CONFIG_REG_MSB")
-            )
-        )
-        fsm.act("CONFIG_REG_MSB",
-            If(~self.decoder.k,
-                load_config_reg_msb.eq(1)
-            ),
-            NextState("START")
-        )
-        fsm.act("DATA",
-            If(self.decoder.k,
-                NextState("START")
-            ).Else(
-                self.rx_en.eq(1),
-                timer_en.eq(1)
-            )
-        )
 
 # PCS Gearbox --------------------------------------------------------------------------------------
 
@@ -287,133 +48,369 @@ class PCSGearbox(LiteXModule):
             phase_half.eq(~phase_half),
         ]
 
+# PCS SGMII Timer ----------------------------------------------------------------------------------
+
+SGMII_1000MBPS_SPEED = 0b10
+SGMII_100MBPS_SPEED  = 0b01
+SGMII_10MBPS_SPEED   = 0b00
+
+class PCSSGMIITimer(LiteXModule):
+    def __init__(self, speed):
+        self.enable = Signal()
+        self.done   = Signal()
+
+        # # #
+
+        count = Signal(max=100)
+        self.comb += self.done.eq(count == 0)
+        self.sync += [
+            count.eq(count - 1),
+            If(~self.enable | self.done,
+                Case(speed, {
+                    SGMII_10MBPS_SPEED   : count.eq(99),
+                    SGMII_100MBPS_SPEED  : count.eq(9),
+                    SGMII_1000MBPS_SPEED : count.eq(0),
+                })
+            )
+        ]
+
+# PCS TX -------------------------------------------------------------------------------------------
+
+class PCSTX(LiteXModule):
+    def __init__(self, lsb_first=False):
+        self.config_valid = Signal()                               # Config valid.
+        self.config_reg   = Signal(16)                             # Config register (16-bit).
+        self.sgmii_speed  = Signal(2)                              # SGMII speed.
+        self.sink         = sink = stream.Endpoint([("data", 8)])  # Data input.
+
+        self.encoder = Encoder(lsb_first=lsb_first) # 8b/10b Encoder.
+
+        # Signals.
+        # --------
+        count  = Signal() # Byte counter for config register.
+        parity = Signal() # Parity for /R/ extension.
+        ctype  = Signal() # Toggles config type.
+
+        # SGMII Timer.
+        # ------------
+        self.timer = timer = PCSSGMIITimer(speed=self.sgmii_speed)
+
+        # FSM.
+        # ----
+        self.fsm = fsm = FSM()
+        fsm.act("START",
+            self.encoder.k[0].eq(1),
+            self.encoder.d[0].eq(K(28, 5)),
+            # Wait for valid Config.
+            If(self.config_valid,
+                NextValue(count, 0),
+                NextState("CONFIG-D")
+            # Wait for valid Data.
+            ).Else(
+                If(sink.valid,
+                    sink.ready.eq(timer.done),
+                    self.encoder.d[0].eq(K(27, 7)), # Start-of-packet /S/.
+                    NextState("DATA")
+                ).Else(
+                    NextState("IDLE")
+                )
+            )
+        )
+        fsm.act("CONFIG-D",
+            # Send Configuration Word.
+            Case(ctype, {
+                0b0 : self.encoder.d[0].eq(D(21, 5)), # /C1/.
+                0b1 : self.encoder.d[0].eq(D( 2, 2)), # /C2/.
+            }),
+            NextValue(ctype, ~ctype),
+            NextState("CONFIG-REG")
+        ),
+        fsm.act("CONFIG-REG",
+            # Send Configuration Register.
+            NextValue(count, count + 1),
+            Case(count, {
+                0 : self.encoder.d[0].eq(self.config_reg[:8]), # LSB.
+                1 : self.encoder.d[0].eq(self.config_reg[8:]), # MSB.
+            }),
+            If(count == (2 - 1), NextState("START"))
+        )
+        fsm.act("IDLE",
+            # Send Idle words and handle disparity.
+            Case(self.encoder.disparity[0], {
+                0b0 : self.encoder.d[0].eq(D(5, 6)),   # /I1/ (Preserves disparity).
+                0b1 : self.encoder.d[0].eq(D(16, 2)),  # /I2/ (Flips disparity).
+            }),
+            NextState("START")
+        )
+        fsm.act("DATA",
+            # Send Data.
+            timer.enable.eq(1),
+            sink.ready.eq(timer.done),
+            If(sink.valid,
+                self.encoder.d[0].eq(sink.data),
+            ).Else(
+                self.encoder.k[0].eq(1),
+                self.encoder.d[0].eq(K(29, 7)), # End-of-frame /T/.
+                NextState("CARRIER-EXTEND")
+            )
+        )
+        fsm.act("CARRIER-EXTEND",
+            # Extend carrier with /R/ symbols.
+            self.encoder.k[0].eq(1),
+            self.encoder.d[0].eq(K(23, 7)), # Carrier Extend /R/.
+            If(parity,
+                NextState("START")
+            )
+        )
+        self.sync += parity.eq(~parity) # Toggle parity for /R/ extension.
+
+# PCS RX -------------------------------------------------------------------------------------------
+
+class PCSRX(LiteXModule):
+    def __init__(self, lsb_first=False):
+        self.seen_valid_ci   = Signal()   # CI seen.
+        self.seen_config_reg = Signal()   # Config seen.
+        self.config_reg      = Signal(16) # Config register (16-bit).
+        self.sgmii_speed     = Signal(2)  # SGMII speed.
+        self.source          = source = stream.Endpoint([("data", 8), ("error", 1)]) # Data output.
+
+        self.decoder = Decoder(lsb_first=lsb_first) # 8b/10b Decoder.
+
+        # # #
+
+        # Signals.
+        # --------
+        count = Signal() # Byte counter for config register.
+
+        # SGMII Timer.
+        # ------------
+        self.timer = timer = CEInserter()(PCSSGMIITimer(speed=self.sgmii_speed))
+        self.comb += timer.ce.eq(self.decoder.ce)
+
+        # Buffer.
+        # -------
+        self.buffer = buffer = stream.Buffer([("data", 8)], pipe_valid=True, pipe_ready=False)
+        self.comb += If(timer.ce & timer.done,
+            buffer.source.connect(source, omit={"last", "error"}),
+            source.last.eq(buffer.source.valid & ~buffer.sink.valid), # Last when next is not valid.
+        )
+
+        # FSM.
+        # ----
+        self.fsm = fsm = FSM()
+        fsm.act("START",
+            If(self.decoder.ce,
+                # Wait for a K-character.
+                If(self.decoder.k,
+                    # K-character is Config or Idle K28.5.
+                    If(self.decoder.d == K(28, 5),
+                        NextValue(count, 0),
+                        NextState("CONFIG-D-OR-IDLE")
+                    ),
+                    # K-character is Start-of-packet /S/.
+                    If(self.decoder.d == K(27, 7),
+                        timer.enable.eq(1),
+                        buffer.sink.valid.eq(1),
+                        buffer.sink.data.eq(0x55), # First Preamble Byte.
+                        NextState("DATA")
+                    )
+                )
+            )
+        )
+        fsm.act("CONFIG-D-OR-IDLE",
+            If(self.decoder.ce,
+                If(~self.decoder.k & ~self.decoder.invalid,
+                    # Check for Configuration Word.
+                    If((self.decoder.d == D(21, 5)) | # /C1/.
+                       (self.decoder.d == D( 2, 2)),  # /C2/.
+                        self.seen_valid_ci.eq(1),
+                        NextState("CONFIG-REG")
+                    ),
+                    # Check for Idle Word.
+                    If((self.decoder.d == D( 5, 6)) | # /I1/.
+                       (self.decoder.d == D(16, 2)),  # /I2/.
+                        self.seen_valid_ci.eq(1),
+                        NextState("START")
+                    )
+                ).Else(
+                    NextState("ERROR"),
+                )
+            )
+        )
+        fsm.act("CONFIG-REG",
+            If(self.decoder.ce,
+                If(~self.decoder.k & ~self.decoder.invalid,
+                    # Receive for Configuration Register.
+                    NextValue(count, count + 1),
+                    Case(count, {
+                        0b0 : NextValue(self.config_reg[:8], self.decoder.d), # LSB.
+                        0b1 : NextValue(self.config_reg[8:], self.decoder.d), # MSB.
+                    }),
+                    If(count == (2 - 1),
+                        self.seen_config_reg.eq(1),
+                        NextState("START")
+                    )
+                ).Else(
+                    NextState("ERROR"),
+                )
+            )
+        )
+        fsm.act("DATA",
+            If(self.decoder.ce,
+                If(~self.decoder.k & ~self.decoder.invalid,
+                    # Receive Data.
+                    timer.enable.eq(1),
+                    buffer.sink.valid.eq(timer.done),
+                    buffer.sink.data.eq(self.decoder.d),
+                ).Elif(self.decoder.k & (self.decoder.d == K(29, 7)) & ~self.decoder.invalid,
+                    # K-character is End-of-packet /S/.
+                    NextState("START"),
+                ).Else(
+                    source.error.eq(1),
+                    source.last.eq(1),
+                    source.valid.eq(1),
+                    If(source.ready,
+                       NextState("ERROR"),
+                    )
+                )
+            )
+        )
+        fsm.act("ERROR",
+            NextState("START")
+        )
+
 # PCS ----------------------------------------------------------------------------------------------
 
 class PCS(LiteXModule):
-    def __init__(self, lsb_first=False, check_period=6e-3, more_ack_time=10e-3):
+    autocsr_exclude = {"ev"}
+    def __init__(self, lsb_first=False, check_period=6e-3, breaklink_time=10e-3, more_ack_time=10e-3, sgmii_ack_time=1.6e-3, with_csr=False):
         self.tx = ClockDomainsRenamer("eth_tx")(PCSTX(lsb_first=lsb_first))
         self.rx = ClockDomainsRenamer("eth_rx")(PCSRX(lsb_first=lsb_first))
 
-        self.tbi_tx = self.tx.encoder.output[0]
-        self.tbi_rx = self.rx.decoder.input
-        self.sink   = stream.Endpoint(eth_phy_description(8))
-        self.source = stream.Endpoint(eth_phy_description(8))
+        self.tbi_tx    = self.tx.encoder.output[0]
+        self.tbi_rx    = self.rx.decoder.input
+        self.tbi_rx_ce = self.rx.decoder.ce
+        self.sink      = stream.Endpoint(eth_phy_description(8))
+        self.source    = stream.Endpoint(eth_phy_description(8))
 
         self.link_up = Signal()
         self.restart = Signal()
+        self.align   = Signal()
 
         self.lp_abi = BusSynchronizer(16, "eth_rx", "eth_tx")
 
         # # #
-        
-        # Endpoint interface.
+
+        # Signals.
+        # --------
+        self.config_empty = config_empty = Signal()
+        self.is_sgmii     = is_sgmii     = Signal()
+        self.linkdown     = linkdown     = Signal()
+        self.autoneg_ack  = autoneg_ack  = Signal()
+
+        # Sink -> TX / RX -> Source.
         self.comb += [
-            self.tx.tx_valid.eq(self.sink.valid),
-            self.sink.ready.eq(self.tx.tx_ready),
-            self.tx.tx_data.eq(self.sink.data),
+            self.sink.connect(self.tx.sink,     omit={"last_be", "error"}),
+            self.rx.source.connect(self.source, omit={"last_be"}),
         ]
 
-        rx_en_d = Signal()
-        self.sync.eth_rx += [
-            rx_en_d.eq(self.rx.rx_en),
-            self.source.valid.eq(self.rx.sample_en),
-            self.source.data.eq(self.rx.rx_data),
-        ]
-        self.comb += self.source.last.eq(~self.rx.rx_en & rx_en_d)
-
-        # Main module.
-        seen_valid_ci = PulseSynchronizer("eth_rx", "eth_tx")
-        self.submodules += seen_valid_ci
+        # Pulse Synchronizers.
+        # --------------------
+        self.seen_valid_ci     = seen_valid_ci     = PulseSynchronizer("eth_rx", "eth_tx")
+        self.rx_config_reg_abi = rx_config_reg_abi = PulseSynchronizer("eth_rx", "eth_tx")
+        self.rx_config_reg_ack = rx_config_reg_ack = PulseSynchronizer("eth_rx", "eth_tx")
         self.comb += seen_valid_ci.i.eq(self.rx.seen_valid_ci)
 
-        checker_max_val = ceil(check_period*125e6)
-        checker_counter = Signal(max=checker_max_val+1)
-        checker_tick = Signal()
-        checker_ok = Signal()
+        # Timers.
+        # -------
+        self.breaklink_timer = breaklink_timer = ClockDomainsRenamer("eth_tx")(WaitTimer(breaklink_time * 125e6))
+        self.more_ack_timer  = more_ack_timer  = ClockDomainsRenamer("eth_tx")(WaitTimer(more_ack_time  * 125e6))
+        self.sgmii_ack_timer = sgmii_ack_timer = ClockDomainsRenamer("eth_tx")(WaitTimer(sgmii_ack_time * 125e6))
+
+        # Checker.
+        # --------
+        checker_max   = int(check_period*125e6)
+        checker_count = Signal(max=checker_max + 1)
+        checker_tick  = Signal()
+        checker_error = Signal()
         self.sync.eth_tx += [
             checker_tick.eq(0),
-            If(checker_counter == 0,
+            If(checker_count == 0,
                 checker_tick.eq(1),
-                checker_counter.eq(checker_max_val)
+                checker_count.eq(checker_max)
             ).Else(
-                checker_counter.eq(checker_counter-1)
+                checker_count.eq(checker_count - 1)
             ),
-            If(seen_valid_ci.o, checker_ok.eq(1)),
-            If(checker_tick, checker_ok.eq(0))
+            If(seen_valid_ci.o, checker_error.eq(0)),
+            If(checker_tick,    checker_error.eq(1))
         ]
 
-        # Control if tx_config_reg should be empty.
-        tx_config_empty = Signal()
-        # Detections in SGMII mode.
-        is_sgmii = Signal()
-        linkdown = Signal()
+        # Linkdown/Speed Detection.
+        # -------------------------
         self.comb += [
             is_sgmii.eq(self.lp_abi.o[0]),
             # Detect that link is down:
             # - 1000BASE-X : linkup can be inferred by non-empty reg.
             # - SGMII      : linkup is indicated with bit 15.
-            linkdown.eq((self.lp_abi.o[0] & ~self.lp_abi.o[15]) | (self.lp_abi.o == 0)),
-            self.tx.sgmii_speed.eq(Mux(self.lp_abi.o[0],
-                self.lp_abi.o[10:12], 0b10)),
-            self.rx.sgmii_speed.eq(Mux(self.lp_abi.i[0],
-                self.lp_abi.i[10:12], 0b10))
+            If(~is_sgmii,
+                linkdown.eq(self.lp_abi.o == 0),
+                self.tx.sgmii_speed.eq(0b10),
+                self.rx.sgmii_speed.eq(0b10),
+            ).Else(
+                linkdown.eq(is_sgmii & ~self.lp_abi.o[15]),
+                self.tx.sgmii_speed.eq(self.lp_abi.o[10:12]),
+                self.rx.sgmii_speed.eq(self.lp_abi.i[10:12]),
+            )
         ]
-        autoneg_ack = Signal()
+
+        # TX Config.
+        # ----------
         self.comb += [
-            self.tx.config_reg.eq(Mux(tx_config_empty, 0,
-                (is_sgmii)                          | # SGMII: SGMII in-use
-                (~is_sgmii << 5)                    | # 1000BASE-X: Full-duplex
-                (Mux(self.lp_abi.o[0],                # SGMII: Speed
-                    self.lp_abi.o[10:12], 0) << 10) |
-                (is_sgmii << 12)                    | # SGMII: Full-duplex
-                (autoneg_ack << 14)                 | # SGMII/1000BASE-X: Acknowledge Bit
-                (is_sgmii & self.link_up)             # SGMII: Link-up
-            ))
+            If(~config_empty,
+                self.tx.config_reg[0].eq(is_sgmii),     # SGMII: SGMII in-use.
+                self.tx.config_reg[5].eq(~is_sgmii),    # 1000BASE-X: Full-duplex.
+                self.tx.config_reg[14].eq(autoneg_ack), # SGMII/1000BASE-X: Acknowledge Bit.
+            )
         ]
 
-        rx_config_reg_abi = PulseSynchronizer("eth_rx", "eth_tx")
-        rx_config_reg_ack = PulseSynchronizer("eth_rx", "eth_tx")
-        self.submodules += rx_config_reg_abi, rx_config_reg_ack
-
-        self.more_ack_timer = more_ack_timer = ClockDomainsRenamer("eth_tx")(WaitTimer(ceil(more_ack_time*125e6)))
-        # SGMII: use 1.6ms link_timer
-        self.sgmii_ack_timer = sgmii_ack_timer = ClockDomainsRenamer("eth_tx")(WaitTimer(ceil(1.6e-3*125e6)))
-
+        # FSM.
+        # ----
         self.fsm = fsm = ClockDomainsRenamer("eth_tx")(FSM())
-        # AN_ENABLE
-        fsm.act("AUTONEG_BREAKLINK",
+        # AN_ENABLE.
+        fsm.act("AUTONEG-BREAKLINK",
             self.tx.config_valid.eq(1),
-            tx_config_empty.eq(1),
-            more_ack_timer.wait.eq(1),
-            If(more_ack_timer.done,
-                NextState("AUTONEG_WAIT_ABI")
+            config_empty.eq(1),
+            breaklink_timer.wait.eq(1),
+            If(breaklink_timer.done,
+                NextState("AUTONEG-WAIT-ABI")
             )
         )
-        # ABILITY_DETECT
-        fsm.act("AUTONEG_WAIT_ABI",
+        # ABILITY_DETECT.
+        fsm.act("AUTONEG-WAIT-ABI",
+            self.align.eq(1),
             self.tx.config_valid.eq(1),
             If(rx_config_reg_abi.o,
-                NextState("AUTONEG_WAIT_ACK")
+                NextState("AUTONEG-WAIT-ACK")
             ),
-            If(checker_tick & ~checker_ok,
+            If(checker_tick & checker_error,
                 self.restart.eq(1),
-                NextState("AUTONEG_BREAKLINK")
+                NextState("AUTONEG-BREAKLINK")
             )
         )
-        # ACKNOWLEDGE_DETECT
-        fsm.act("AUTONEG_WAIT_ACK",
+        # ACKNOWLEDGE_DETECT.
+        fsm.act("AUTONEG-WAIT-ACK",
             self.tx.config_valid.eq(1),
             autoneg_ack.eq(1),
             If(rx_config_reg_ack.o,
-                NextState("AUTONEG_SEND_MORE_ACK")
+                NextState("AUTONEG-SEND-MORE-ACK")
             ),
-            If(checker_tick & ~checker_ok,
+            If(checker_tick & checker_error,
                 self.restart.eq(1),
-                NextState("AUTONEG_BREAKLINK")
+                NextState("AUTONEG-BREAKLINK")
             )
         )
-        # COMPLETE_ACKNOWLEDGE
-        fsm.act("AUTONEG_SEND_MORE_ACK",
+        # COMPLETE_ACKNOWLEDGE.
+        fsm.act("AUTONEG-SEND-MORE-ACK",
             self.tx.config_valid.eq(1),
             autoneg_ack.eq(1),
             more_ack_timer.wait.eq(~is_sgmii),
@@ -422,47 +419,87 @@ class PCS(LiteXModule):
                 (~is_sgmii & more_ack_timer.done),
                 NextState("RUNNING")
             ),
-            If(checker_tick & ~checker_ok,
+            If(checker_tick & checker_error,
                 self.restart.eq(1),
-                NextState("AUTONEG_BREAKLINK")
+                NextState("AUTONEG-BREAKLINK")
             )
         )
-        # LINK_OK
+        # LINK_OK.
         fsm.act("RUNNING",
-            self.link_up.eq(1),
-            If((checker_tick & ~checker_ok) | linkdown,
+            self.link_up.eq(~linkdown),
+            If((checker_tick & checker_error) | linkdown,
                 self.restart.eq(1),
-                NextState("AUTONEG_BREAKLINK")
+                NextState("AUTONEG-BREAKLINK")
             )
         )
 
-        c_counter       = Signal(max=5)
-        prev_config_reg = Signal(16)
+        # RX Config (and consistency check).
+        # ----------------------------------
+        rx_config_reg_count  = Signal(4)
+        rx_config_reg_last   = Signal(16)
         self.sync.eth_rx += [
-            # Restart consistency counter
             If(self.rx.seen_config_reg,
-                c_counter.eq(4)
-            ).Elif(c_counter != 0,
-                c_counter.eq(c_counter - 1)
-            ),
-
-            rx_config_reg_abi.i.eq(0),
-            rx_config_reg_ack.i.eq(0),
-            If(self.rx.seen_config_reg,
-                # Record current config_reg for comparison in the next clock cycle
-                prev_config_reg.eq(self.rx.config_reg),
-                # Compare consecutive values of config_reg
-                If((c_counter == 1) & (prev_config_reg&0xbfff == self.rx.config_reg&0xbfff),
-                    # Acknowledgement/Consistency match
-                    If(prev_config_reg[14] & self.rx.config_reg[14],
-                        rx_config_reg_ack.i.eq(1),
+                # Consistency Count/Check.
+                rx_config_reg_last.eq(self.rx.config_reg),
+                If(self.rx.config_reg != rx_config_reg_last,
+                    rx_config_reg_count.eq(8 - 1)
+                ).Else(
+                    If(rx_config_reg_count != 0,
+                        rx_config_reg_count.eq(rx_config_reg_count - 1),
                     )
-                    # Ability match
-                    .Else(
+                ),
+                # When RX Config is consistent.
+                If(rx_config_reg_count == 0,
+                    # Acknowledgement.
+                    If(self.rx.config_reg[14],
+                        rx_config_reg_ack.i.eq(1),
+                    # Ability match.
+                    ).Else(
                         rx_config_reg_abi.i.eq(1),
                     )
                 ),
-                # Record advertised ability of link partner
                 self.lp_abi.i.eq(self.rx.config_reg)
             )
         ]
+
+        if with_csr:
+            self.add_csr()
+
+    def add_csr(self):
+        self.status = CSRStatus(fields=[
+            CSRField("link_up",    size=1,  offset=0,  description="Link is up."),
+            CSRField("is_sgmii",   size=1,  offset=1,  description="SGMII in-use."),
+            CSRField("config_reg", size=16, offset=16, description="config_reg"),
+        ])
+        
+        self.lp_abi_csr = BusSynchronizer(16, "eth_rx", "sys")
+
+        self.ev      = EventManager()
+        self.ev.link = EventSourceProcess(edge="any")
+        self.ev.finalize()
+
+        self.comb += [
+            self.lp_abi_csr.i.eq(self.lp_abi.i),
+            self.status.fields.config_reg.eq(self.lp_abi_csr.o)
+        ]
+
+        self.sync += [
+            self.status.fields.link_up.eq(self.link_up),
+            self.status.fields.is_sgmii.eq(self.is_sgmii),
+        ]
+
+        self.link_up_timer = link_up_timer = WaitTimer(int(LiteXContext.top.sys_clk_freq))
+
+        self.fsm = fsm = FSM()
+        fsm.act("DOWN",
+            If(self.link_up,
+                NextState("UP")
+            )
+        )
+        fsm.act("UP",
+            link_up_timer.wait.eq(1),
+            self.ev.link.trigger.eq(link_up_timer.done),
+            If(~self.link_up,
+                NextState("DOWN"),
+            )
+        )

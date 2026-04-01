@@ -110,15 +110,6 @@ class LiteEthIPV4Fragmenter(LiteXModule):
         ww = dw // 8
         # counter logic ;)
         counter = Signal(11)
-        counter_reset = Signal()
-        counter_reset_val = Signal(11)
-        counter_ce = Signal()
-        self.sync += \
-            If(counter_reset,
-                counter.eq(counter_reset_val)
-            ).Elif(counter_ce,
-                counter.eq(counter - 1)
-            )
         self.mf = mf = Signal(reset=0)  # mf == More Fragments
         self.fragment_offset = fragment_offset = Signal(13, reset=0)
         self.identification = identification = Signal(16, reset=0)
@@ -137,8 +128,7 @@ class LiteEthIPV4Fragmenter(LiteXModule):
                        sink.connect(source)
                    ).Else(
                        sink.ready.eq(0),
-                       counter_reset.eq(1),
-                       counter_reset_val.eq(IP_MTU >> 3),
+                       NextValue(counter, IP_MTU >> 3),
                        source.length.eq(bytes_in_fragment),
                        NextValue(mf, 1),
                        NextValue(fragment_offset, 0),
@@ -154,7 +144,7 @@ class LiteEthIPV4Fragmenter(LiteXModule):
                 source.length.eq(bytes_in_fragment),
                 source.last.eq(counter == 1),
                 If(sink.valid & source.ready,
-                   counter_ce.eq(1),
+                   NextValue(counter, counter - 1),
                    If(source.last,
                       NextValue(fragment_offset,
                                 fragment_offset + (bytes_in_fragment >> 3)),
@@ -163,7 +153,6 @@ class LiteEthIPV4Fragmenter(LiteXModule):
                          NextValue(fragment_offset, 0),
                          NextState("IDLE")
                          ).Else(
-                             counter_ce.eq(0),
                              NextState("NEXT_FRAGMENT")
                         )
                     )
@@ -171,35 +160,20 @@ class LiteEthIPV4Fragmenter(LiteXModule):
         )
 
         fsm.act("NEXT_FRAGMENT",
-                counter_ce.eq(0),
                 sink.ready.eq(0),
                 source.valid.eq(0),
                 source.length.eq(bytes_in_fragment),
-                counter_reset.eq(1),
                 If((sink.length - (fragment_offset << 3)) > IP_MTU,
                     NextValue(bytes_in_fragment, IP_MTU),
-                    counter_reset_val.eq(IP_MTU >> 3),
+                    NextValue(counter, IP_MTU >> 3),
                 ).Else(
                     NextValue(bytes_in_fragment,
                               sink.length - (fragment_offset << 3)),
                     NextValue(mf, 0),
-                    counter_reset_val.eq((sink.length - (fragment_offset << 3)) >> 3)
+                    NextValue(counter, (sink.length - (fragment_offset << 3)) >> 3),
                 ),
                 NextState("FRAGMENTED_PACKET_SEND")
         )
-
-        fsm.act("FLUSH_PIPELINE",
-                counter_ce.eq(1),
-                sink.ready.eq(0),
-                source.valid.eq(0),
-                source.length.eq(bytes_in_fragment),
-                If(counter == (20 << 3),
-                   counter_ce.eq(0),
-                   counter_reset.eq(1),
-                   NextState("FRAGMENTED_PACKET_SEND")
-                )
-        )
-
 
 
 class LiteEthIPTX(LiteXModule):

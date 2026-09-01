@@ -89,7 +89,7 @@ class LiteEthVLANUDPIPCore(LiteXModule):
         self.clk_freq = clk_freq
         self.dw = dw
         ip_address = convert_ip(ip_address)
-        self.mac = LiteEthMAC(phy, dw, interface="crossbar", with_preamble_crc=True, tx_cdc_buffered=True)
+        self.mac = LiteEthMAC(phy, dw, interface="crossbar", with_preamble_crc=True, tx_cdc_depth=512, tx_cdc_buffered=True)
 
         # self.arp = LiteEthARP(self.mac, mac_address, ip_address, clk_freq, dw=dw)
         # self.ip  = LiteEthIP(self.mac, mac_address, ip_address, self.arp.table, with_broadcast=False, dw=dw)
